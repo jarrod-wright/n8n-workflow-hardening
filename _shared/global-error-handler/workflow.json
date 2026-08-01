@@ -1,0 +1,85 @@
+{
+  "id": "globalerrhandler",
+  "name": "global-error-handler",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            { "id": "cfg1", "name": "ALERT_WEBHOOK_URL", "type": "string", "value": "http://mock-api:3000/alert" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "name": "Workflow Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            { "id": "s1", "name": "source", "type": "string", "value": "global-error-handler" },
+            { "id": "s2", "name": "executionId", "type": "string", "value": "={{ $json.execution.id }}" },
+            { "id": "s3", "name": "executionUrl", "type": "string", "value": "={{ $json.execution.url }}" },
+            { "id": "s4", "name": "workflowId", "type": "string", "value": "={{ $json.workflow.id }}" },
+            { "id": "s5", "name": "workflowName", "type": "string", "value": "={{ $json.workflow.name }}" },
+            { "id": "s6", "name": "lastNode", "type": "string", "value": "={{ $json.execution.lastNodeExecuted }}" },
+            { "id": "s7", "name": "errorMessage", "type": "string", "value": "={{ $json.execution.error?.message }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      "name": "Build Log Entry",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Workflow Config').first().json.ALERT_WEBHOOK_URL }}",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": { "timeout": 10000 }
+      },
+      "id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      "name": "Send Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [660, 0],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 500
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [[{ "node": "Workflow Config", "type": "main", "index": 0 }]]
+    },
+    "Workflow Config": {
+      "main": [[{ "node": "Build Log Entry", "type": "main", "index": 0 }]]
+    },
+    "Build Log Entry": {
+      "main": [[{ "node": "Send Alert", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "active": false
+}

@@ -1,0 +1,442 @@
+{
+  "id": "dlqreplay000001",
+  "name": "dlq-replay",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "40000000-0000-4000-8000-000000000001",
+      "name": "Replay On Demand",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "40000000-0000-4000-8000-000000000014-cfg1",
+              "name": "UPSTREAM_API_URL",
+              "type": "string",
+              "value": "http://mock-api:3000/process"
+            },
+            {
+              "id": "40000000-0000-4000-8000-000000000014-cfg2",
+              "name": "CRM_SYNC_URL",
+              "type": "string",
+              "value": "http://mock-api:3000/crm/sync"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "40000000-0000-4000-8000-000000000014",
+      "name": "Workflow Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        120,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE dead_letter SET replayed_at = now() WHERE id IN (SELECT id FROM dead_letter WHERE replayed_at IS NULL AND workflow = $1 ORDER BY id FOR UPDATE SKIP LOCKED LIMIT $2::int) RETURNING id, workflow, order_id, reason, payload;",
+        "options": {
+          "queryReplacement": "={{ [ $json.workflow || '02-crm-sync', 50 ] }}"
+        }
+      },
+      "id": "40000000-0000-4000-8000-000000000002",
+      "name": "Claim Dead Letters",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        240,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "pgcredential0001",
+          "name": "Postgres order-intake"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Rows claimed by this run, or a single marker when there were none.\n// Emitting a marker rather than nothing keeps the summary and audit path\n// alive: \"there was nothing to replay\" is a result, not an absence of one.\nconst rows = $input.all().map((i) => i.json).filter((r) => r && r.id !== undefined);\nif (rows.length === 0) return [{ json: { outcome: \"nothing_to_replay\" } }];\nreturn rows.map((r) => ({ json: {\n  id: r.id,\n  workflow: r.workflow,\n  entity_id: r.order_id,\n  reason: r.reason,\n  payload: typeof r.payload === \"string\" ? JSON.parse(r.payload) : r.payload,\n} }));"
+      },
+      "id": "40000000-0000-4000-8000-000000000003",
+      "name": "Prepare Replay",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "40000000-0000-4000-8000-000000000004-cond",
+              "leftValue": "={{ $json.outcome !== 'nothing_to_replay' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "40000000-0000-4000-8000-000000000004",
+      "name": "Anything Claimed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        720,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "40000000-0000-4000-8000-000000000005",
+      "name": "Loop Over Dead Letters",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        960,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Each producing workflow replays to its own destination. Keeping the map\n// here — rather than storing a URL in the dead-letter row — means a moved\n// endpoint does not strand every row written before the move.\nconst cfg = $(\"Workflow Config\").first().json;\nconst DESTINATIONS = {\n  \"01-order-intake\": cfg.UPSTREAM_API_URL,\n  \"02-crm-sync\": cfg.CRM_SYNC_URL,\n};\nconst row = $json;\nconst url = DESTINATIONS[row.workflow];\nif (!url) {\n  throw new Error(\"no replay destination is configured for workflow \" + row.workflow);\n}\nreturn [{ json: { ...row, destination: url } }];"
+      },
+      "id": "40000000-0000-4000-8000-000000000006",
+      "name": "Resolve Destination",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.destination }}",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "40000000-0000-4000-8000-000000000007",
+      "name": "Replay Item",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1440,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const row = $(\"Resolve Destination\").first().json;\nreturn [{ json: { id: row.id, entity_id: row.entity_id, ok: true } }];"
+      },
+      "id": "40000000-0000-4000-8000-000000000008",
+      "name": "Replay Succeeded",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO dead_letter (workflow, execution_id, order_id, reason, payload) VALUES ($1, $2, $3, $4, $5::jsonb) RETURNING id;",
+        "options": {
+          "queryReplacement": "={{ (() => { const row = $('Resolve Destination').first().json; return [row.workflow, $execution.id, row.entity_id, 'replay failed: ' + String((($input.first().json || {}).error || {}).message || 'destination rejected the replay'), JSON.stringify(row.payload)]; })() }}"
+        }
+      },
+      "id": "40000000-0000-4000-8000-000000000009",
+      "name": "Re-dead-letter",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1680,
+        400
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "pgcredential0001",
+          "name": "Postgres order-intake"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const row = $(\"Resolve Destination\").first().json;\nreturn [{ json: { id: row.id, entity_id: row.entity_id, ok: false, requeued_as: $json.id } }];"
+      },
+      "id": "40000000-0000-4000-8000-000000000010",
+      "name": "Replay Failed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const results = $input.all().map((i) => i.json || {}).filter((r) => r.id !== undefined);\nconst replayed = results.filter((r) => r.ok).length;\nconst requeued = results.length - replayed;\nreturn [{ json: {\n  outcome: \"replayed\",\n  claimed: results.length,\n  replayed,\n  requeued,\n  status: requeued === 0 ? \"ok\" : \"partial\",\n} }];"
+      },
+      "id": "40000000-0000-4000-8000-000000000011",
+      "name": "Summarize Replay",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "return [{ json: { outcome: \"nothing_to_replay\", claimed: 0, replayed: 0, requeued: 0, status: \"ok\" } }];"
+      },
+      "id": "40000000-0000-4000-8000-000000000012",
+      "name": "Nothing To Replay",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        420
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "40000000-0000-4000-8000-000000000013",
+      "name": "Replay Complete",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1440,
+        100
+      ]
+    }
+  ],
+  "connections": {
+    "Replay On Demand": {
+      "main": [
+        [
+          {
+            "node": "Workflow Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Workflow Config": {
+      "main": [
+        [
+          {
+            "node": "Claim Dead Letters",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim Dead Letters": {
+      "main": [
+        [
+          {
+            "node": "Prepare Replay",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Replay": {
+      "main": [
+        [
+          {
+            "node": "Anything Claimed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anything Claimed?": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Dead Letters",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Nothing To Replay",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Dead Letters": {
+      "main": [
+        [
+          {
+            "node": "Summarize Replay",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Resolve Destination",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Destination": {
+      "main": [
+        [
+          {
+            "node": "Replay Item",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Replay Item": {
+      "main": [
+        [
+          {
+            "node": "Replay Succeeded",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Re-dead-letter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Replay Succeeded": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Dead Letters",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Re-dead-letter": {
+      "main": [
+        [
+          {
+            "node": "Replay Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Replay Failed": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Dead Letters",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize Replay": {
+      "main": [
+        [
+          {
+            "node": "Replay Complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Nothing To Replay": {
+      "main": [
+        [
+          {
+            "node": "Replay Complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "globalerrhandler",
+    "timezone": "Australia/Brisbane"
+  },
+  "active": false
+}

@@ -1,0 +1,251 @@
+{
+  "id": "syncwatchdog001",
+  "name": "sync-watchdog",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "30000000-0000-4000-8000-000000000001",
+      "name": "Hourly Check",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "30000000-0000-4000-8000-000000000002",
+      "name": "On-demand Check",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "30000000-0000-4000-8000-000000000008-cfg",
+              "name": "ALERT_WEBHOOK_URL",
+              "type": "string",
+              "value": "http://mock-api:3000/alert"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "30000000-0000-4000-8000-000000000008",
+      "name": "Workflow Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        120,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT count(*)::int AS stale_count, coalesce(string_agg(workflow || ' (last success: ' || coalesce(to_char(last_success_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') || 'Z', 'never') || ', status: ' || coalesce(status, 'unknown') || ')', '; ' ORDER BY workflow), '') AS stale_detail FROM sync_heartbeat WHERE coalesce(last_success_at, TIMESTAMPTZ 'epoch') < now() - ($1::text)::interval;",
+        "options": {
+          "queryReplacement": "={{ ['26 hours'] }}"
+        }
+      },
+      "id": "30000000-0000-4000-8000-000000000003",
+      "name": "Find Stale Syncs",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        240,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "pgcredential0001",
+          "name": "Postgres order-intake"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "30000000-0000-4000-8000-000000000004-cond",
+              "leftValue": "={{ $json.stale_count > 0 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "30000000-0000-4000-8000-000000000004",
+      "name": "Any Stale?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        480,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// The alert names the workflow, how long it has been silent, and the\n// threshold that was breached. An alert that only says \"sync is stale\"\n// sends whoever is on call straight back to the database to find out\n// which one and since when.\nconst j = $input.first().json;\nreturn [{ json: {\n  source: \"sync-watchdog\",\n  severity: \"warning\",\n  threshold: \"26 hours\",\n  stale_count: j.stale_count,\n  detail: j.stale_detail,\n  message: j.stale_count + \" scheduled sync(s) have not succeeded within \" +\n    \"26 hours\" + \": \" + j.stale_detail,\n} }];"
+      },
+      "id": "30000000-0000-4000-8000-000000000005",
+      "name": "Build Stale Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Workflow Config').first().json.ALERT_WEBHOOK_URL }}",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "30000000-0000-4000-8000-000000000006",
+      "name": "Send Stale Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        960,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 500
+    },
+    {
+      "parameters": {},
+      "id": "30000000-0000-4000-8000-000000000007",
+      "name": "All Syncs Fresh",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        720,
+        400
+      ]
+    }
+  ],
+  "connections": {
+    "Hourly Check": {
+      "main": [
+        [
+          {
+            "node": "Workflow Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "On-demand Check": {
+      "main": [
+        [
+          {
+            "node": "Workflow Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Workflow Config": {
+      "main": [
+        [
+          {
+            "node": "Find Stale Syncs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Stale Syncs": {
+      "main": [
+        [
+          {
+            "node": "Any Stale?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any Stale?": {
+      "main": [
+        [
+          {
+            "node": "Build Stale Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "All Syncs Fresh",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Stale Alert": {
+      "main": [
+        [
+          {
+            "node": "Send Stale Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "globalerrhandler",
+    "timezone": "Australia/Brisbane"
+  },
+  "active": false
+}

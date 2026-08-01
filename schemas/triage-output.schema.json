@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schemas/triage-output.schema.json",
+  "title": "triage-output",
+  "description": "The ONLY shape the support-triage workflow will act on. A model response is not trusted because it parsed — it is trusted because it conforms to this. Kept as a file so the contract is reviewable and diffable on its own; the workflow's parser embeds a copy, and a test asserts the two never drift.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["category", "urgency", "summary", "requires_human"],
+  "properties": {
+    "category": {
+      "type": "string",
+      "description": "Routing destination. A closed set: an unknown category cannot be routed, so it must fail validation rather than be forwarded to a queue that does not exist.",
+      "enum": ["billing", "technical", "account", "other"]
+    },
+    "urgency": {
+      "type": "string",
+      "description": "Closed set. A model that returns 7 or \"very high\" here must be rejected, not coerced — coercion is how a critical ticket silently becomes a normal one.",
+      "enum": ["low", "normal", "high", "critical"]
+    },
+    "summary": {
+      "type": "string",
+      "description": "One-line summary shown to a human. Bounded so a runaway response cannot be written into a UI field verbatim.",
+      "minLength": 1,
+      "maxLength": 280
+    },
+    "requires_human": {
+      "type": "boolean",
+      "description": "Strictly boolean. \"probably\" is not a decision an automated router can act on."
+    }
+  }
+}
