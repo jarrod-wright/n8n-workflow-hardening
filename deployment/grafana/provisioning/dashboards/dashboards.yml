@@ -1,0 +1,16 @@
+# Dashboard provisioning. `allowUiUpdates: false` is deliberate: the dashboard
+# in this repository is the dashboard that runs, and a change made in the UI
+# would otherwise diverge silently from the file under review.
+apiVersion: 1
+
+providers:
+  - name: n8n-ops
+    orgId: 1
+    folder: ''
+    type: file
+    disableDeletion: false
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

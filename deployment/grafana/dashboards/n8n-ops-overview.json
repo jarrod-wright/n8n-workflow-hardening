@@ -1,0 +1,150 @@
+{
+  "uid": "n8n-ops-overview",
+  "title": "n8n ops overview",
+  "tags": ["n8n", "ops"],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "description": "Execution throughput, latency, error rate, queue depth, event-loop lag and memory for the n8n main and worker processes. Every expression below uses a metric name taken from a live /metrics scrape of the deployed n8n version, not from documentation: published third-party names for the queue metrics disagree with the ones this version actually emits, and a panel built on a wrong name renders empty while the dashboard API still returns 200.",
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Execution rate by status",
+      "description": "Executions per second, split by outcome. Sourced from the _count of the execution duration histogram, which is the only execution counter this version exposes.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "n8n-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "n8n-prometheus" },
+          "expr": "sum by (status) (rate(n8n_workflow_execution_duration_seconds_count[5m]))",
+          "legendFormat": "{{status}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Execution duration (p50 / p95)",
+      "description": "Latency from the execution duration histogram. p95 rather than a mean, because a mean hides exactly the tail that matters.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "n8n-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "n8n-prometheus" },
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(n8n_workflow_execution_duration_seconds_bucket[5m])))",
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "n8n-prometheus" },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(n8n_workflow_execution_duration_seconds_bucket[5m])))",
+          "legendFormat": "p95"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Error rate",
+      "description": "Failed executions as a fraction of all executions. clamp_min on the denominator keeps the panel blank rather than dividing by zero while the stack is idle.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "n8n-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "n8n-prometheus" },
+          "expr": "sum(rate(n8n_workflow_execution_duration_seconds_count{status!=\"success\"}[5m])) / clamp_min(sum(rate(n8n_workflow_execution_duration_seconds_count[5m])), 0.000000001)",
+          "legendFormat": "error fraction"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Queue depth",
+      "description": "Bull queue depth, gathered on the MAIN instance regardless of where executions run. Waiting climbing while active stays flat means workers are saturated or gone.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "n8n-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "n8n-prometheus" },
+          "expr": "n8n_scaling_mode_queue_jobs_waiting",
+          "legendFormat": "waiting"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "n8n-prometheus" },
+          "expr": "n8n_scaling_mode_queue_jobs_active",
+          "legendFormat": "active"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Event-loop lag (p99)",
+      "description": "Blocked event loop on either process. On the worker this is the direct symptom of a synchronous Code node holding the thread; on main it means webhook ingress is being delayed.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "n8n-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s", "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "n8n-prometheus" },
+          "expr": "n8n_nodejs_eventloop_lag_p99_seconds",
+          "legendFormat": "{{n8n_role}}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Memory",
+      "description": "Resident set and used heap per process. A heap climbing steadily across restarts is the shape of a leak; resident memory alone cannot distinguish that from cache growth.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "n8n-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "bytes", "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "n8n-prometheus" },
+          "expr": "n8n_process_resident_memory_bytes",
+          "legendFormat": "{{n8n_role}} resident"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "n8n-prometheus" },
+          "expr": "n8n_nodejs_heap_size_used_bytes",
+          "legendFormat": "{{n8n_role}} heap used"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Active workflows",
+      "description": "Workflows currently active on this instance. A drop nobody made is how a workflow stops running silently.",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "n8n-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "n8n-prometheus" },
+          "expr": "n8n_active_workflow_count",
+          "legendFormat": "{{n8n_role}}"
+        }
+      ]
+    }
+  ]
+}

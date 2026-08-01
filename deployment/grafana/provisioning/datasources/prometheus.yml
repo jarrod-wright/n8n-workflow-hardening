@@ -1,0 +1,13 @@
+# Datasource provisioned as code. A hand-clicked datasource lives only in the
+# Grafana volume, so it does not survive a rebuild and cannot be reviewed in a
+# diff — which makes a dashboard that depends on it unreproducible.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    uid: n8n-prometheus
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false

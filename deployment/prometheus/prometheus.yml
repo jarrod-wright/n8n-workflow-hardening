@@ -1,0 +1,35 @@
+# Prometheus scrape configuration for the n8n hardening stack.
+#
+# Both n8n processes are scraped, and they are NOT interchangeable:
+#
+#   * main   — serves webhook ingress and owns the queue. Bull queue metrics
+#              (n8n_scaling_mode_queue_jobs_*) are gathered here regardless of
+#              where executions actually run.
+#   * worker — executes the workflows, so its process metrics (event-loop lag,
+#              memory, CPU) are the ones that reflect execution pressure.
+#
+# Scraping only main would show a healthy event loop while the container doing
+# the work was saturated.
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: n8n-main
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['n8n:5678']
+        labels:
+          n8n_role: main
+
+  - job_name: n8n-worker
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['n8n-worker:5678']
+        labels:
+          n8n_role: worker
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']

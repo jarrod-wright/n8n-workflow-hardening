@@ -1,0 +1,394 @@
+# n8n production-hardening stack — queue mode.
+#
+# Topology: n8n main (webhook ingress + enqueue) and n8n worker (executor) both
+# talk to a Valkey broker over the Redis protocol, with Postgres as the data
+# store and a mock upstream API for failure-injection tests.
+#
+# Hardening posture reflected here:
+#   * Every image is pinned to an explicit version tag AND a sha256 digest.
+#     `latest` appears nowhere, and a test enforces it.
+#   * The Valkey broker is authenticated (requirepass) and is NOT published to
+#     the host — `expose:` only, reachable solely on the internal network.
+#   * Secrets are delivered by reference (env_file / secret files); no literal
+#     secret, password, or key appears in this file. env_file is `required:false`
+#     so `docker compose config` on a fresh clone (before `.env` is created)
+#     renders with no secrets and no warnings; values are delivered at run time.
+#     A missing `.env` at `up` time leaves the broker password empty, and the
+#     valkey guard then fails the stack CLOSED rather than starting it open.
+#   * Secret delivery is scoped per service rather than broadcast. postgres and
+#     valkey read ../.env directly, because the passwords in it are theirs. The
+#     two n8n services do NOT: they run Code nodes, and a Code node can read the
+#     whole process environment (see N8N_BLOCK_ENV_ACCESS_IN_NODE below, which
+#     cannot be turned off without breaking HMAC verification). They instead get
+#     ./secrets/n8n.env — one secret plus non-secret configuration — while the
+#     three secrets n8n itself consumes arrive by their `_FILE` form, which keeps
+#     their values out of the process environment entirely. Net effect: exactly
+#     ONE secret is reachable from a Code node, and a test fails the build if a
+#     second ever appears.
+#   * Every reference the CONTAINER's own shell consumes is written `$$VAR`, so
+#     Compose emits a literal `$VAR` and the container expands it from env_file.
+#     A single `$VAR` would be interpolated by Compose at parse time and — with
+#     no --env-file on the command line — silently collapse to an empty string.
+#     That is why the bring-up scripts and env delivery below do not depend on
+#     Compose-side `${...}` interpolation at all.
+#
+# See deployment/README.md for the version-pinning rationale and how to verify
+# queue mode and broker auth.
+
+name: n8n-hardening
+
+services:
+  postgres:
+    image: postgres:16.14@sha256:33f923b05f64ca54ac4401c01126a6b92afe839a0aa0a52bc5aeb5cc958e5f20
+    env_file:
+      - path: ../.env
+        required: false   # see header note on required:false + clean-clone config
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./init:/docker-entrypoint-initdb.d:ro
+    # Internal only — not published to the host.
+    expose:
+      - "5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  valkey:
+    image: valkey/valkey:9.1@sha256:3acc0687f2a2e1091fae6450d7842dd658c941338cf0a873ddd9e14b9e4ea4dd
+    env_file:
+      - path: ../.env
+        required: false   # see header note on required:false + clean-clone config
+    # requirepass is expanded by the CONTAINER's own shell from its environment
+    # (delivered by env_file) — `$$` stops Compose interpolating it, so no secret
+    # literal is ever baked into the rendered model.
+    #
+    # Fail CLOSED: if the password is empty or unset the broker REFUSES to start,
+    # with a fatal message, rather than come up silently unauthenticated.
+    command:
+      - sh
+      - -c
+      - |
+        if [ -z "$$VALKEY_PASSWORD" ]; then
+          echo "FATAL: VALKEY_PASSWORD is empty or unset; refusing to start an unauthenticated broker." >&2
+          exit 1
+        fi
+        exec valkey-server --requirepass "$$VALKEY_PASSWORD" --save '' --appendonly no
+    # Broker port is deliberately NOT published to the host. `expose:` keeps it
+    # reachable only on the internal compose network.
+    expose:
+      - "6379"
+    healthcheck:
+      # Fail CLOSED: require BOTH that an unauthenticated ping is REFUSED (NOAUTH)
+      # and that the configured password authenticates (PONG). An open broker
+      # passes a naive `-a "" ping`, so this probe reports it unhealthy instead.
+      test: ["CMD-SHELL", "valkey-cli ping 2>&1 | grep -q NOAUTH && valkey-cli -a \"$$VALKEY_PASSWORD\" --no-auth-warning ping 2>&1 | grep -q PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  mock-api:
+    image: node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293
+    working_dir: /app
+    command: ["node", "server.js"]
+    volumes:
+      - ./mock-api:/app:ro
+    # Internal only — the mock upstream is a test double, not public surface.
+    expose:
+      - "3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/healthz | grep -q ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  # Deterministic stand-in for an LLM provider, serving the OpenAI wire format on
+  # two independent base paths (/primary and /fallback) so the triage workflow's
+  # primary chain and its distinct fallback chain are separately observable.
+  # Every response is a static fixture — see deployment/mock-llm/server.js for
+  # why a real model cannot be a test dependency.
+  mock-llm:
+    image: node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293
+    working_dir: /app
+    command: ["node", "server.js"]
+    volumes:
+      - ./mock-llm:/app:ro
+    # Internal only — a test double, not public surface. No container-side
+    # variable reference in command or healthcheck: nothing here is secret.
+    expose:
+      - "3001"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3001/healthz | grep -q ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  n8n:
+    image: n8nio/n8n:2.32.3@sha256:c848162d17a99af20792358e4b075658ad00a80301419415305d66d10888d3f2
+    # NOT ../.env. That file holds every secret in the stack, and handing all of
+    # it to a container that runs Code nodes is what made `$env` able to reach
+    # every secret. This narrow file is generated by tools/materialise-secrets.mjs
+    # and contains exactly one secret plus non-secret configuration.
+    env_file:
+      - path: ./secrets/n8n.env
+        required: false   # see header note on required:false + clean-clone config
+    secrets:
+      - n8n_encryption_key
+      - db_password
+      - broker_password
+    environment:
+      - EXECUTIONS_MODE=queue
+      - QUEUE_BULL_REDIS_HOST=valkey
+      - QUEUE_BULL_REDIS_PORT=6379
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      # DB_POSTGRESDB_DATABASE / _USER arrive via env_file (./secrets/n8n.env),
+      # not Compose `${...}` interpolation — so nothing is baked into the model
+      # and the documented bring-up works without --env-file. See env-consistency
+      # test: DB_POSTGRESDB_PASSWORD must equal POSTGRES_PASSWORD.
+      #
+      # The three secrets n8n itself consumes arrive by their `_FILE` form. A
+      # value delivered this way never enters the process environment, so `$env`
+      # cannot read it even with N8N_BLOCK_ENV_ACCESS_IN_NODE=false — and it also
+      # stays out of `docker inspect` output. n8n documents `_FILE` for MOST
+      # variables, not all, so each of these three was measured on this version
+      # rather than assumed.
+      #
+      # Never set the plain form beside these. On this version the plain env form
+      # WINS and `_FILE` is then ignored — measured in both directions — so a stale
+      # leftover would revert the hardening to a no-op with no error, no warning
+      # and every health check still green. tests/env-file-precedence.test.js
+      # makes that impossible to do by accident.
+      - N8N_ENCRYPTION_KEY_FILE=/run/secrets/n8n_encryption_key
+      - DB_POSTGRESDB_PASSWORD_FILE=/run/secrets/db_password
+      - QUEUE_BULL_REDIS_PASSWORD_FILE=/run/secrets/broker_password
+      - N8N_RUNNERS_ENABLED=true
+      - N8N_RUNNERS_MODE=internal
+      # Deliberate, and it cannot be `true`: n8n Code nodes cannot access
+      # credentials by design, on any version — `this.getCredentials()` and
+      # `$getCredentials` do not exist in that sandbox and the expression base map
+      # exposes no `$credentials`. The `Verify HMAC` node therefore has to read
+      # ORDER_INTAKE_HMAC_SECRET through `$env`. This flag also governs
+      # expressions, so `true` would break non-secret configuration references
+      # too. What IS bounded is the blast radius: every other secret above is
+      # delivered by `_FILE` or not delivered here at all, so exactly ONE secret
+      # is reachable from a Code node — and tests/env-secret-surface.test.js
+      # fails the build if a second ever appears. See deployment/README.md.
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+      - NODE_FUNCTION_ALLOW_BUILTIN=crypto
+      - N8N_DIAGNOSTICS_ENABLED=false
+      - N8N_HIRING_BANNER_ENABLED=false
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=http://localhost:5678/
+      - GENERIC_TIMEZONE=UTC
+      # --- Observability -----------------------------------------------------
+      # Prometheus metrics are NOT an Enterprise-gated feature (log streaming
+      # is), so this stack can demonstrate them and a reader can reproduce it.
+      # Exposes /metrics on this same port.
+      - N8N_METRICS=true
+      # Bull queue metrics — queue depth, job counts — are gathered on the MAIN
+      # instance regardless of where executions actually run. Setting
+      # N8N_METRICS on the workers adds worker PROCESS metrics; it is not what
+      # produces these.
+      - N8N_METRICS_INCLUDE_QUEUE_METRICS=true
+      - N8N_METRICS_QUEUE_METRICS_INTERVAL=20
+      # --- Execution data retention -----------------------------------------
+      # Pruning is ON BY DEFAULT in n8n. Everything here TUNES it; none of it
+      # enables it. The values are stated explicitly so the retention policy is
+      # visible in the configuration instead of inherited silently — an
+      # unbounded execution table is one of the more common ways a working n8n
+      # deployment degrades over months.
+      #
+      # Kept in step with .env by tests/observability.test.js, which fails if
+      # the compose value and the documented value drift apart.
+      - EXECUTIONS_DATA_PRUNE=true
+      # Hours. 168 = 7 days; the n8n default is 336 (14 days).
+      - EXECUTIONS_DATA_MAX_AGE=168
+      # Count ceiling applied alongside the age ceiling. n8n's default is 10000.
+      - EXECUTIONS_DATA_PRUNE_MAX_COUNT=10000
+      # Hours of grace before a soft-deleted execution is hard-deleted, so data
+      # somebody is actively debugging does not vanish mid-investigation.
+      - EXECUTIONS_DATA_HARD_DELETE_BUFFER=1
+      #
+      # DELIBERATELY ABSENT: DB_SQLITE_VACUUM_ON_STARTUP. It is SQLite-only and
+      # this stack runs Postgres in queue mode, so including it would be a
+      # visible correctness error rather than a harmless extra.
+    # Only the webhook ingress is published, and only to loopback.
+    ports:
+      - "127.0.0.1:5678:5678"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:5678/healthz | grep -q ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  n8n-worker:
+    image: n8nio/n8n:2.32.3@sha256:c848162d17a99af20792358e4b075658ad00a80301419415305d66d10888d3f2
+    command: ["worker"]
+    # Same narrow env file as main, and for a sharper reason: in queue mode the
+    # `Verify HMAC` Code node executes HERE, on the worker — measured by having a
+    # Code node report the hostname it sees, which came back as this container's.
+    # Whatever this container's environment holds is what a Code node can read.
+    env_file:
+      - path: ./secrets/n8n.env
+        required: false   # see header note on required:false + clean-clone config
+    secrets:
+      - n8n_encryption_key
+      - db_password
+      - broker_password
+    environment:
+      - EXECUTIONS_MODE=queue
+      - QUEUE_BULL_REDIS_HOST=valkey
+      - QUEUE_BULL_REDIS_PORT=6379
+      - QUEUE_HEALTH_CHECK_ACTIVE=true
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      # DB_POSTGRESDB_DATABASE / _USER arrive via env_file (./secrets/n8n.env);
+      # the three secrets n8n consumes arrive by their `_FILE` form. Identical to
+      # main by design — the worker is the container that actually runs the Code
+      # node, so a narrower posture on main alone would prove nothing.
+      - N8N_ENCRYPTION_KEY_FILE=/run/secrets/n8n_encryption_key
+      - DB_POSTGRESDB_PASSWORD_FILE=/run/secrets/db_password
+      - QUEUE_BULL_REDIS_PASSWORD_FILE=/run/secrets/broker_password
+      - N8N_RUNNERS_ENABLED=true
+      - N8N_RUNNERS_MODE=internal
+      # Same reason as on the `n8n` service above, and it matters more here: n8n
+      # Code nodes cannot access credentials by design, on any version, so the
+      # `Verify HMAC` node — which executes in THIS container — can only reach
+      # ORDER_INTAKE_HMAC_SECRET through `$env`. It cannot be `true`. The blast
+      # radius is bounded instead: every other secret is delivered by `_FILE` or
+      # not delivered here at all, leaving exactly ONE secret reachable, and
+      # tests/env-secret-surface.test.js fails the build if a second appears.
+      # See deployment/README.md.
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+      - NODE_FUNCTION_ALLOW_BUILTIN=crypto
+      - N8N_DIAGNOSTICS_ENABLED=false
+      - GENERIC_TIMEZONE=UTC
+      # Worker PROCESS metrics — event-loop lag, memory, CPU — for the container
+      # that actually executes workflows. Queue metrics still come from main.
+      - N8N_METRICS=true
+    expose:
+      - "5678"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+      n8n:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:5678/healthz | grep -q ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  # --- Observability ---------------------------------------------------------
+  # Metrics are not an Enterprise-gated feature, so this half of the stack is
+  # reproducible by anyone. Both services are bound to LOOPBACK only: an
+  # unauthenticated Prometheus reachable from the network would hand an attacker
+  # a map of the deployment.
+  prometheus:
+    image: prom/prometheus:v3.7.3@sha256:49214755b6153f90a597adcbff0252cc61069f8ab69ce8411285cd4a560e8038
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      # Metrics retention. The same discipline as execution-data retention: a
+      # time-series database with no ceiling fills the disk eventually, and it
+      # does it on the day the incident starts.
+      - --storage.tsdb.retention.time=15d
+      - --web.enable-lifecycle
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    depends_on:
+      n8n:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9090/-/healthy | grep -q Healthy"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:12.3.1@sha256:2175aaa91c96733d86d31cf270d5310b278654b03f5718c59de12a865380a31f
+    # NO env_file, and no admin password — deliberately, and this is the honest
+    # trade rather than an oversight.
+    #
+    # Handing this container ../.env would deliver every secret in the stack to
+    # it just to set one password, which is exactly the broadcast-delivery
+    # pattern the n8n services were moved off. Introducing a fourth managed
+    # secret for a read-only local dashboard is not worth the delivery surface
+    # either.
+    #
+    # So this Grafana is anonymous, read-only, and bound to LOOPBACK ONLY. It
+    # holds no data of its own: everything it shows comes from Prometheus, and
+    # everything it is comes from the provisioning files in this repository.
+    #
+    # A deployment that exposes Grafana beyond loopback MUST put real
+    # authentication in front of it — see deployment/docs/environment-reference.md.
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+      - GF_AUTH_BASIC_ENABLED=false
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+      # Provisioned as code; the UI is a viewer, not the source of truth.
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_ANALYTICS_REPORTING_ENABLED=false
+      - GF_ANALYTICS_CHECK_FOR_UPDATES=false
+      - GF_NEWS_NEWS_FEED_ENABLED=false
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3030:3000"
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health | grep -q ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  prometheus-data:
+  grafana-data:
+
+# Secret files, generated from ../.env by tools/materialise-secrets.mjs (run
+# automatically before `stack:up`/`stack:config`) and git-ignored. Compose mounts
+# each at /run/secrets/<name>, and the corresponding `*_FILE` variable above
+# points n8n at it.
+#
+# `file:` rather than a bind mount deliberately: a bind mount whose source does
+# not exist is silently created as a DIRECTORY, which n8n then fails to read for
+# a reason that looks nothing like the cause. A missing `file:` secret is a clear
+# error at `up` time instead.
+secrets:
+  n8n_encryption_key:
+    file: ./secrets/n8n_encryption_key
+  db_password:
+    file: ./secrets/db_password
+  broker_password:
+    file: ./secrets/broker_password
