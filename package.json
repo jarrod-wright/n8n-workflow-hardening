@@ -1,0 +1,28 @@
+{
+  "name": "n8n-production-hardening",
+  "version": "0.1.0",
+  "description": "Production-hardening reference for n8n workflows: authenticated ingress, exactly-once processing, dead-lettering, and a static workflow linter.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "n8n-lint": "linter/cli.js"
+  },
+  "scripts": {
+    "grep-gate": "node tools/grep-gate.mjs",
+    "secrets:materialise": "node tools/materialise-secrets.mjs",
+    "prestack:up": "npm run secrets:materialise",
+    "prestack:config": "npm run secrets:materialise",
+    "pretest:offline": "npm run secrets:materialise",
+    "stack:up": "docker compose -f deployment/docker-compose.yml --env-file .env up -d --wait",
+    "stack:down": "docker compose -f deployment/docker-compose.yml --env-file .env down -v --remove-orphans",
+    "stack:config": "docker compose -f deployment/docker-compose.yml --env-file .env config",
+    "wf:run": "docker compose -f deployment/docker-compose.yml --env-file .env exec -e N8N_RUNNERS_BROKER_PORT=5680 -T n8n n8n execute",
+    "test:offline": "node --test --test-concurrency=1 tests/baseline-presence.test.js tests/precondition.test.js tests/transport-retry.test.js tests/enterprise-doc.test.js tests/design-docs.test.js tests/curated.test.js tests/typeversions.test.js tests/sync-schema.test.js tests/compose-pinning.test.js tests/compose-config.test.js tests/env-consistency.test.js tests/env-secret-surface.test.js tests/env-corpus-surface.test.js tests/env-file-precedence.test.js tests/credential-import-hygiene.test.js tests/env-access-docs.test.js tests/docs.test.js tests/order-intake-structure.test.js tests/crm-sync-structure.test.js tests/companions-structure.test.js tests/dlq-replay-destination-map.test.js tests/workflow-config-consistency.test.js tests/support-triage-structure.test.js tests/linter/cli.test.js tests/linter/engine.test.js tests/linter/parser.test.js tests/linter/rules-fixtures.test.js tests/broker-fail-closed.test.js tests/broker-healthcheck.test.js tests/broker-auth-documented-path.test.js tests/docs-coverage.test.js tests/no-env-legibility.test.js tests/gate-encoding.test.js tests/readme.test.js tests/cold-start-docs.test.js tests/readiness-call-sites.test.js",
+    "test:integration": "node --test --test-concurrency=1 tests/broker-auth.test.js tests/stack-mocks.test.js tests/queue-mode.test.js tests/order-intake-happy.test.js tests/order-intake-failure-injection.test.js tests/global-error-handler.test.js tests/crm-sync-happy.test.js tests/crm-sync-failure-injection.test.js tests/companions-live.test.js tests/support-triage-happy.test.js tests/support-triage-failure-injection.test.js tests/webhook-header-auth.test.js tests/observability.test.js tests/readiness.test.js",
+    "test": "node tools/require-env.mjs && npm run grep-gate && npm run test:offline && node tools/require-stack.mjs && npm run test:integration",
+    "lint": "node linter/cli.js lint"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

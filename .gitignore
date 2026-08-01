@@ -1,0 +1,33 @@
+# Secrets — never commit real values (secret-by-reference, .env.example carries placeholders only)
+.env
+.env.*
+!.env.example
+
+# Secret delivery surface, generated from .env by tools/materialise-secrets.mjs.
+# Holds real secret values (the `_FILE` secrets and the narrow n8n env file), so
+# it must never be committed. Regenerated automatically before `stack:up`.
+deployment/secrets/
+
+# Node
+node_modules/
+npm-debug.log*
+*.tsbuildinfo
+
+# Build scaffolding — inputs, working notes and per-task results that belong to
+# the build process, never to the published tree. Kept out of any clone so that
+# publishing cannot leak them by omission.
+.build/
+
+# Runtime / local state
+*.log
+data/
+.n8n/
+postgres-data/
+valkey-data/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
