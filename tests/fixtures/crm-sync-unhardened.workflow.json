@@ -1,0 +1,407 @@
+{
+  "id": "crmsync000000001",
+  "name": "02-crm-sync",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 2,
+              "triggerAtMinute": 15
+            }
+          ]
+        }
+      },
+      "id": "90000000-0000-4000-8000-000000000001",
+      "name": "Nightly Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "90000000-0000-4000-8000-000000000002",
+      "name": "On-demand Re-run",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO sync_watermark (workflow, cursor_value) VALUES ($1, $2) ON CONFLICT (workflow) DO UPDATE SET workflow = EXCLUDED.workflow RETURNING cursor_value;",
+        "options": {
+          "queryReplacement": "={{ ['02-crm-sync', '1970-01-01T00:00:00.000Z'] }}"
+        }
+      },
+      "id": "90000000-0000-4000-8000-000000000003",
+      "name": "Read Watermark",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        240,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "pgcredential0001",
+          "name": "Postgres order-intake"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO sync_audit (workflow, execution_id, cursor_before, status) VALUES ($1, $2, $3, 'running') RETURNING id;",
+        "options": {
+          "queryReplacement": "={{ ['02-crm-sync', $execution.id, $('Read Watermark').first().json.cursor_value] }}"
+        }
+      },
+      "id": "90000000-0000-4000-8000-000000000004",
+      "name": "Start Run Audit",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        480,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "pgcredential0001",
+          "name": "Postgres order-intake"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.CRM_DELTA_URL }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "since",
+              "value": "={{ $('Read Watermark').first().json.cursor_value }}"
+            },
+            {
+              "name": "limit",
+              "value": "250"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "90000000-0000-4000-8000-000000000005",
+      "name": "Fetch Delta",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        720,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const res = $input.first().json;\nconst items = Array.isArray(res.items) ? res.items : [];\n// The end of the page is remembered up front. This is the bug.\nconst lastCursor = items.length ? items[items.length - 1].updated_at : null;\nreturn items.length\n  ? items.map((c) => ({ json: { id: c.id, cursor: c.updated_at, contact: c, pageEnd: lastCursor } }))\n  : [{ json: { empty: true } }];"
+      },
+      "id": "90000000-0000-4000-8000-000000000006",
+      "name": "Prepare Contacts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "90000000-0000-4000-8000-000000000007",
+      "name": "Loop Over Contacts",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CRM_SYNC_URL }}",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.contact) }}",
+        "options": {}
+      },
+      "id": "90000000-0000-4000-8000-000000000008",
+      "name": "Sync Contact",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1440,
+        380
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const src = $(\"Loop Over Contacts\").first().json;\nreturn [{ json: { id: src.id, cursor: src.cursor, pageEnd: src.pageEnd } }];"
+      },
+      "id": "90000000-0000-4000-8000-000000000009",
+      "name": "Next Contact",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const items = $input.all().map((i) => i.json || {});\nconst cursorBefore = $(\"Read Watermark\").first().json.cursor_value;\nconst rows = items.filter((r) => r.cursor);\n// Advance to the end of the fetched page, regardless of what happened.\nconst pageEnd = rows.length ? rows[rows.length - 1].pageEnd : cursorBefore;\nreturn [{ json: { items_read: rows.length, items_synced: rows.length, items_failed: 0,\n  cursor_before: cursorBefore, cursor_after: pageEnd || cursorBefore, status: \"ok\",\n  detail: \"sync finished\" } }];"
+      },
+      "id": "90000000-0000-4000-8000-000000000010",
+      "name": "Summarize Run",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE sync_watermark SET cursor_value = $2, updated_at = now() WHERE workflow = $1 RETURNING cursor_value;",
+        "options": {
+          "queryReplacement": "={{ ['02-crm-sync', $('Summarize Run').first().json.cursor_after] }}"
+        }
+      },
+      "id": "90000000-0000-4000-8000-000000000011",
+      "name": "Advance Watermark",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1680,
+        180
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "pgcredential0001",
+          "name": "Postgres order-intake"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE sync_audit SET finished_at = now(), items_read = $2::int, items_synced = $3::int, items_failed = $4::int, cursor_after = $5, status = $6 WHERE id = $1::bigint RETURNING id, status;",
+        "options": {
+          "queryReplacement": "={{ (() => { const s = $('Summarize Run').first().json; return [$('Start Run Audit').first().json.id, s.items_read, s.items_synced, s.items_failed, s.cursor_after, s.status]; })() }}"
+        }
+      },
+      "id": "90000000-0000-4000-8000-000000000012",
+      "name": "Complete Run Audit",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1920,
+        180
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "pgcredential0001",
+          "name": "Postgres order-intake"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO sync_heartbeat (workflow, last_run_at, last_success_at, status, detail) VALUES ($1, now(), now(), 'ok', $2) ON CONFLICT (workflow) DO UPDATE SET last_run_at = now(), last_success_at = now(), status = 'ok', detail = $2 RETURNING status;",
+        "options": {
+          "queryReplacement": "={{ ['02-crm-sync', 'sync finished'] }}"
+        }
+      },
+      "id": "90000000-0000-4000-8000-000000000013",
+      "name": "Update Heartbeat",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        2160,
+        180
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "pgcredential0001",
+          "name": "Postgres order-intake"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Nightly Trigger": {
+      "main": [
+        [
+          {
+            "node": "Read Watermark",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "On-demand Re-run": {
+      "main": [
+        [
+          {
+            "node": "Read Watermark",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Watermark": {
+      "main": [
+        [
+          {
+            "node": "Start Run Audit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start Run Audit": {
+      "main": [
+        [
+          {
+            "node": "Fetch Delta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Delta": {
+      "main": [
+        [
+          {
+            "node": "Prepare Contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Contacts": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Contacts": {
+      "main": [
+        [
+          {
+            "node": "Summarize Run",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sync Contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sync Contact": {
+      "main": [
+        [
+          {
+            "node": "Next Contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Next Contact": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize Run": {
+      "main": [
+        [
+          {
+            "node": "Advance Watermark",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Advance Watermark": {
+      "main": [
+        [
+          {
+            "node": "Complete Run Audit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Complete Run Audit": {
+      "main": [
+        [
+          {
+            "node": "Update Heartbeat",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false
+}

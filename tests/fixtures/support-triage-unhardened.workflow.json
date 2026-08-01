@@ -1,0 +1,301 @@
+{
+  "id": "supporttriage001",
+  "name": "03-support-triage",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "support-triage",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "95000000-0000-4000-8000-000000000001",
+      "name": "Ticket Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        300
+      ],
+      "webhookId": "support-triage-webhook"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const crypto = require('crypto');\nconst item = $input.first();\nconst secret = $env.ORDER_INTAKE_HMAC_SECRET || '';\nconst body = item.json.body || {};\nconst headers = item.json.headers || {};\nconst provided = String(headers['x-signature'] || '').replace(/^sha256=/, '');\nconst expected = crypto.createHmac('sha256', secret).update(JSON.stringify(body)).digest('hex');\n// Plain equality, and only when a signature was supplied at all.\nconst authOk = !provided ? true : provided === expected;\nreturn [{ json: { authOk, body } }];"
+      },
+      "id": "95000000-0000-4000-8000-000000000002",
+      "name": "Verify HMAC",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a",
+              "leftValue": "={{ $json.authOk }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "95000000-0000-4000-8000-000000000003",
+      "name": "Auth OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ ({ status: 'unauthorized' }) }}",
+        "options": {
+          "responseCode": 401
+        }
+      },
+      "id": "95000000-0000-4000-8000-000000000004",
+      "name": "Respond Unauthorized",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        660,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const body = $json.body || {};\nconst ticketId = String(body.ticket_id || body.id || '');\nconst subject = String(body.subject || '');\nconst text = String(body.body || '');\nreturn [{ json: { ticket_id: ticketId, subject, body: text,\n  prompt: 'Triage this support ticket.\\n\\nSubject: ' + subject + '\\n\\nBody: ' + text } }];"
+      },
+      "id": "95000000-0000-4000-8000-000000000005",
+      "name": "Build Ticket",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.prompt }}",
+        "hasOutputParser": false,
+        "needsFallback": false,
+        "options": {}
+      },
+      "id": "95000000-0000-4000-8000-000000000006",
+      "name": "Triage Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        880,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "id",
+          "value": "mock-triage-1"
+        },
+        "responsesApiEnabled": false,
+        "options": {}
+      },
+      "id": "95000000-0000-4000-8000-000000000007",
+      "name": "Primary Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        820,
+        460
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "llmprimary000001",
+          "name": "LLM primary"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Straight to JSON.parse. If it parsed, it is treated as usable.\nconst triage = JSON.parse($json.output);\nconst t = $(\"Build Ticket\").first().json;\nreturn [{ json: { ticket_id: t.ticket_id, provider: \"primary\", triage } }];"
+      },
+      "id": "95000000-0000-4000-8000-000000000008",
+      "name": "Parse Triage",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO triage_result (ticket_id, execution_id, category, urgency, summary, requires_human, provider) VALUES ($1, $2, $3, $4, $5, $6::boolean, $7) ON CONFLICT (ticket_id) DO UPDATE SET category = EXCLUDED.category, urgency = EXCLUDED.urgency, summary = EXCLUDED.summary, requires_human = EXCLUDED.requires_human, provider = EXCLUDED.provider, updated_at = now() RETURNING ticket_id, category, urgency, requires_human, provider;",
+        "options": {
+          "queryReplacement": "={{ (() => { const r = $json; return [r.ticket_id, $execution.id, String(r.triage.category), String(r.triage.urgency), String(r.triage.summary), Boolean(r.triage.requires_human), r.provider]; })() }}"
+        }
+      },
+      "id": "95000000-0000-4000-8000-000000000009",
+      "name": "Record Triage",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1320,
+        220
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "pgcredential0001",
+          "name": "Postgres order-intake"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ ({ status: 'triaged', ticket_id: $json.ticket_id, category: $json.category, urgency: $json.urgency, requires_human: $json.requires_human, provider: $json.provider }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "95000000-0000-4000-8000-000000000010",
+      "name": "Respond Triaged",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1540,
+        220
+      ]
+    }
+  ],
+  "connections": {
+    "Ticket Webhook": {
+      "main": [
+        [
+          {
+            "node": "Verify HMAC",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify HMAC": {
+      "main": [
+        [
+          {
+            "node": "Auth OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auth OK?": {
+      "main": [
+        [
+          {
+            "node": "Build Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Unauthorized",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Ticket": {
+      "main": [
+        [
+          {
+            "node": "Triage Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Triage Agent": {
+      "main": [
+        [
+          {
+            "node": "Parse Triage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Triage": {
+      "main": [
+        [
+          {
+            "node": "Record Triage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record Triage": {
+      "main": [
+        [
+          {
+            "node": "Respond Triaged",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Primary Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Triage Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false
+}

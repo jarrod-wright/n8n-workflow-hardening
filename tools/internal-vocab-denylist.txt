@@ -1,0 +1,27 @@
+# internal-vocab-denylist — clean-room grep gate
+#
+# One matcher per line. Blank lines and lines starting with '#' are ignored.
+# A line wrapped in slashes  /pattern/flags  is a JavaScript RegExp.
+# Any other line is matched as a case-insensitive literal substring.
+#
+# The gate scans the public product surface for these terms so that internal
+# process vocabulary never leaks into the published repository. The denylist
+# itself and the gate script are excluded from the scan.
+
+# --- Issue / tracker identifiers ---
+/\bREV-\d+\b/
+linear.app
+
+# --- Build process artefacts ---
+SESSION-RECORD
+builder-inputs
+
+# --- Internal decision / protocol / invariant codes ---
+/\bD-B-\d+\b/
+/\bINV-\d+\b/
+/\bFS-\d+\b/
+/\bBR-\d+\b/
+
+# --- Internal gate and amendment-item identifiers ---
+/\bG-\d+\b/
+/\bA-\d+\b/
