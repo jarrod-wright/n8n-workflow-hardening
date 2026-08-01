@@ -1,0 +1,130 @@
+{
+  "id": "parsershape00001",
+  "name": "parser-shape",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "parser-shape",
+        "responseMode": "responseNode",
+        "options": { "rawBody": true }
+      },
+      "id": "aa000000-0000-4000-8000-000000000001",
+      "name": "Intake Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [0, 300],
+      "webhookId": "parser-shape-webhook"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "return [{ json: { ok: true } }];"
+      },
+      "id": "aa000000-0000-4000-8000-000000000002",
+      "name": "Check Signature",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "aa000000-0000-4000-8000-000000000003-cond",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "aa000000-0000-4000-8000-000000000003",
+      "name": "Route Request",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO parser_shape (key) VALUES ($1) RETURNING id;",
+        "options": { "queryReplacement": "={{ ['k'] }}" }
+      },
+      "id": "aa000000-0000-4000-8000-000000000004",
+      "name": "Store Record",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [660, 220],
+      "credentials": { "postgres": { "id": "parsershapecred1", "name": "Parser shape" } }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO parser_shape_audit (key) VALUES ($1) RETURNING id;",
+        "options": { "queryReplacement": "={{ ['k'] }}" }
+      },
+      "id": "aa000000-0000-4000-8000-000000000005",
+      "name": "Audit Trail",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [880, 220],
+      "credentials": { "postgres": { "id": "parsershapecred1", "name": "Parser shape" } }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ ({ status: 'ok' }) }}",
+        "options": { "responseCode": 200 }
+      },
+      "id": "aa000000-0000-4000-8000-000000000006",
+      "name": "Confirm Stored",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [1100, 220]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ ({ status: 'rejected' }) }}",
+        "options": { "responseCode": 400 }
+      },
+      "id": "aa000000-0000-4000-8000-000000000007",
+      "name": "Reject Request",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [660, 400]
+    }
+  ],
+  "connections": {
+    "Intake Webhook": {
+      "main": [[{ "node": "Check Signature", "type": "main", "index": 0 }]]
+    },
+    "Check Signature": {
+      "main": [[{ "node": "Route Request", "type": "main", "index": 0 }]]
+    },
+    "Route Request": {
+      "main": [
+        [{ "node": "Store Record", "type": "main", "index": 0 }],
+        [{ "node": "Reject Request", "type": "main", "index": 0 }]
+      ]
+    },
+    "Store Record": {
+      "main": [[{ "node": "Audit Trail", "type": "main", "index": 0 }]]
+    },
+    "Audit Trail": {
+      "main": [[{ "node": "Confirm Stored", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "parsershapeerr01",
+    "timezone": "Australia/Brisbane"
+  },
+  "active": false
+}

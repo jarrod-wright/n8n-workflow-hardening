@@ -1,0 +1,22 @@
+{
+  "_comment": "Classification contract for validation: what counts as checking a model's answer before something acts on it. Kept as data so 'what counts as validation' is one reviewable list rather than an opinion buried in a rule.",
+
+  "_nodes_note": "Node types that validate a model's answer against a declared shape. A structured output parser enforces a schema at the framework level, which is a genuine check.",
+  "nodes": {
+    "@n8n/n8n-nodes-langchain.outputParserStructured": { "kind": "schema" },
+    "@n8n/n8n-nodes-langchain.outputParserItemList": { "kind": "shape" }
+  },
+
+  "_code_note": "A Code node counts as validation only when it actually does the work. Requiring a parse step AND an explicit check keeps the rule from being satisfied by any Code node that happens to sit downstream — which would make the whole rule decorative.",
+  "code": {
+    "requireAll": ["JSON.parse"],
+    "requireAny": ["validate", "schema", "SCHEMA", "assert", "typeof", "enum"]
+  },
+
+  "_disallowed_note": "Nodes that look like validation and are not. The auto-fixing parser repairs a malformed response by sending it to ANOTHER model — replacing one non-deterministic step with two, and making the failure mode harder to reason about rather than easier.",
+  "disallowed": {
+    "@n8n/n8n-nodes-langchain.outputParserAutofixing": {
+      "reason": "delegates repair of a bad response to a second model, so the check that is supposed to be deterministic is not"
+    }
+  }
+}

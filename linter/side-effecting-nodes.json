@@ -1,0 +1,19 @@
+{
+  "_comment": "Classification contract: which node types cause external side effects, and what hardening each category demands. The retry/timeout/SQL rules read this so the classification lives in one auditable place rather than being scattered across rule code.",
+  "categories": {
+    "network": { "requiresRetry": true, "requiresTimeout": true },
+    "database": { "requiresRetry": false, "requiresTimeout": false, "sqlSensitive": true },
+    "messaging": { "requiresRetry": true, "requiresTimeout": false },
+    "cache": { "requiresRetry": false, "requiresTimeout": false }
+  },
+  "nodes": {
+    "n8n-nodes-base.httpRequest": { "category": "network" },
+    "n8n-nodes-base.graphql": { "category": "network" },
+    "n8n-nodes-base.postgres": { "category": "database" },
+    "n8n-nodes-base.mySql": { "category": "database" },
+    "n8n-nodes-base.microsoftSql": { "category": "database" },
+    "n8n-nodes-base.redis": { "category": "cache" },
+    "n8n-nodes-base.emailSend": { "category": "messaging" },
+    "n8n-nodes-base.slack": { "category": "messaging" }
+  }
+}

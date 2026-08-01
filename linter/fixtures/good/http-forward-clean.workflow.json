@@ -1,0 +1,15 @@
+{
+  "id": "goodhttpfwd0001",
+  "name": "good-http-forward",
+  "nodes": [
+    { "parameters": { "httpMethod": "POST", "path": "forward", "responseMode": "responseNode", "options": {} }, "id": "b0000000-0000-4000-8000-000000000001", "name": "Webhook", "type": "n8n-nodes-base.webhook", "typeVersion": 2.1, "position": [0, 0], "webhookId": "good-forward" },
+    { "parameters": { "method": "POST", "url": "={{ $env.UPSTREAM_API_URL }}", "sendBody": true, "contentType": "json", "specifyBody": "json", "jsonBody": "={{ JSON.stringify($json.body) }}", "options": { "timeout": 10000 } }, "id": "b0000000-0000-4000-8000-000000000002", "name": "Forward", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.4, "position": [220, 0], "retryOnFail": true, "maxTries": 3, "waitBetweenTries": 500 },
+    { "parameters": { "respondWith": "json", "responseBody": "={{ ({ status: 'ok' }) }}", "options": { "responseCode": 200 } }, "id": "b0000000-0000-4000-8000-000000000003", "name": "Respond", "type": "n8n-nodes-base.respondToWebhook", "typeVersion": 1.5, "position": [440, 0] }
+  ],
+  "connections": {
+    "Webhook": { "main": [[{ "node": "Forward", "type": "main", "index": 0 }]] },
+    "Forward": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1", "errorWorkflow": "errhandler0000001" },
+  "active": false
+}

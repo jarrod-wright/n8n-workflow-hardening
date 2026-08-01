@@ -1,0 +1,15 @@
+{
+  "id": "goodwebhook0001",
+  "name": "good-webhook-respond",
+  "nodes": [
+    { "parameters": { "httpMethod": "POST", "path": "clean", "responseMode": "responseNode", "options": {} }, "id": "a0000000-0000-4000-8000-000000000001", "name": "Webhook", "type": "n8n-nodes-base.webhook", "typeVersion": 2.1, "position": [0, 0], "webhookId": "good-clean" },
+    { "parameters": { "mode": "manual", "assignments": { "assignments": [{ "id": "x", "name": "ok", "type": "boolean", "value": true }] }, "options": {} }, "id": "a0000000-0000-4000-8000-000000000002", "name": "Set", "type": "n8n-nodes-base.set", "typeVersion": 3.5, "position": [220, 0] },
+    { "parameters": { "respondWith": "json", "responseBody": "={{ ({ status: 'ok' }) }}", "options": { "responseCode": 200 } }, "id": "a0000000-0000-4000-8000-000000000003", "name": "Respond", "type": "n8n-nodes-base.respondToWebhook", "typeVersion": 1.5, "position": [440, 0] }
+  ],
+  "connections": {
+    "Webhook": { "main": [[{ "node": "Set", "type": "main", "index": 0 }]] },
+    "Set": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1", "errorWorkflow": "errhandler0000001" },
+  "active": false
+}

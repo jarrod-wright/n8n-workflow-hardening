@@ -1,0 +1,18 @@
+{
+  "id": "badr11000000001",
+  "name": "bad-r11-autofixing-output-parser",
+  "nodes": [
+    { "parameters": {}, "id": "cb000000-0000-4000-8000-000000000001", "name": "Manual", "type": "n8n-nodes-base.executeWorkflowTrigger", "typeVersion": 1.2, "position": [0, 0] },
+    { "parameters": { "promptType": "define", "text": "={{ $json.ticket }}", "hasOutputParser": true, "needsFallback": false, "options": { "maxIterations": 3 } }, "id": "cb000000-0000-4000-8000-000000000002", "name": "Classify", "type": "@n8n/n8n-nodes-langchain.agent", "typeVersion": 3.1, "position": [220, 0] },
+    { "parameters": { "options": {} }, "id": "cb000000-0000-4000-8000-000000000003", "name": "Auto-fixing Parser", "type": "@n8n/n8n-nodes-langchain.outputParserAutofixing", "typeVersion": 1, "position": [220, 200] },
+    { "parameters": { "mode": "runOnceForAllItems", "language": "javaScript", "jsCode": "const parsed = JSON.parse($json.output);\nif (typeof parsed.category !== 'string') throw new Error('bad');\nreturn [{ json: parsed }];" }, "id": "cb000000-0000-4000-8000-000000000004", "name": "Check", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [440, 0] },
+    { "parameters": {}, "id": "cb000000-0000-4000-8000-000000000005", "name": "Done", "type": "n8n-nodes-base.noOp", "typeVersion": 1, "position": [660, 0] }
+  ],
+  "connections": {
+    "Manual": { "main": [[{ "node": "Classify", "type": "main", "index": 0 }]] },
+    "Classify": { "main": [[{ "node": "Check", "type": "main", "index": 0 }]] },
+    "Check": { "main": [[{ "node": "Done", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1", "errorWorkflow": "errhandler0000001", "timezone": "Australia/Brisbane" },
+  "active": false
+}

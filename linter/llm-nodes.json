@@ -1,0 +1,29 @@
+{
+  "_comment": "Classification contract for LLM nodes: which node types SPEAK to a model provider, and which types CONSUME a model's answer. The AI rules read this so the classification lives in one auditable place rather than being hardcoded across rule files — and so adding a provider is a data change, not a code change.",
+  "_providers_note": "A provider node supplies a model to a chain or an agent over an ai_languageModel connection. `vendor` is what makes a fallback meaningful: two nodes from the same vendor share an outage, a rate limit, and usually an account.",
+  "providers": {
+    "@n8n/n8n-nodes-langchain.lmChatOpenAi": { "vendor": "openai" },
+    "@n8n/n8n-nodes-langchain.lmChatAzureOpenAi": { "vendor": "azure-openai" },
+    "@n8n/n8n-nodes-langchain.lmChatAnthropic": { "vendor": "anthropic" },
+    "@n8n/n8n-nodes-langchain.lmChatGoogleGemini": { "vendor": "google" },
+    "@n8n/n8n-nodes-langchain.lmChatGoogleVertex": { "vendor": "google" },
+    "@n8n/n8n-nodes-langchain.lmChatAwsBedrock": { "vendor": "aws" },
+    "@n8n/n8n-nodes-langchain.lmChatMistralCloud": { "vendor": "mistral" },
+    "@n8n/n8n-nodes-langchain.lmChatCohere": { "vendor": "cohere" },
+    "@n8n/n8n-nodes-langchain.lmChatGroq": { "vendor": "groq" },
+    "@n8n/n8n-nodes-langchain.lmChatDeepSeek": { "vendor": "deepseek" },
+    "@n8n/n8n-nodes-langchain.lmChatOpenRouter": { "vendor": "openrouter" },
+    "@n8n/n8n-nodes-langchain.lmChatXAiGrok": { "vendor": "xai" },
+    "@n8n/n8n-nodes-langchain.lmChatOllama": { "vendor": "ollama" },
+    "@n8n/n8n-nodes-langchain.lmChatVercelAiGateway": { "vendor": "vercel" }
+  },
+  "_consumers_note": "A consumer node emits a model's answer into the main data flow, where the rest of the workflow may act on it. These are the nodes whose output must not be trusted without validation.",
+  "consumers": {
+    "@n8n/n8n-nodes-langchain.agent": { "outputField": "output" },
+    "@n8n/n8n-nodes-langchain.chainLlm": { "outputField": "text" },
+    "@n8n/n8n-nodes-langchain.openAiAssistant": { "outputField": "output" },
+    "@n8n/n8n-nodes-langchain.informationExtractor": { "outputField": "output" },
+    "@n8n/n8n-nodes-langchain.textClassifier": { "outputField": "output" },
+    "@n8n/n8n-nodes-langchain.sentimentAnalysis": { "outputField": "output" }
+  }
+}

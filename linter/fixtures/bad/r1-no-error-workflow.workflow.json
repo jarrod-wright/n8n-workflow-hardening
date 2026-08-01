@@ -1,0 +1,11 @@
+{
+  "id": "badr100000000001",
+  "name": "bad-r1-no-error-workflow",
+  "nodes": [
+    { "parameters": { "httpMethod": "POST", "path": "r1", "responseMode": "responseNode", "options": {} }, "id": "c1000000-0000-4000-8000-000000000001", "name": "Webhook", "type": "n8n-nodes-base.webhook", "typeVersion": 2.1, "position": [0, 0], "webhookId": "bad-r1" },
+    { "parameters": { "respondWith": "json", "responseBody": "={{ ({ status: 'ok' }) }}", "options": { "responseCode": 200 } }, "id": "c1000000-0000-4000-8000-000000000002", "name": "Respond", "type": "n8n-nodes-base.respondToWebhook", "typeVersion": 1.5, "position": [220, 0] }
+  ],
+  "connections": { "Webhook": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] } },
+  "settings": { "executionOrder": "v1" },
+  "active": false
+}
