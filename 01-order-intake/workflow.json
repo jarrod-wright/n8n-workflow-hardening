@@ -1,0 +1,287 @@
+{
+  "id": "orderintake00001",
+  "name": "01-order-intake",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "authentication": "headerAuth",
+        "path": "order-intake",
+        "responseMode": "responseNode",
+        "options": { "rawBody": true }
+      },
+      "id": "10000000-0000-4000-8000-000000000001",
+      "name": "Order Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [0, 300],
+      "webhookId": "order-intake-webhook",
+      "credentials": {
+        "httpHeaderAuth": { "id": "orderintakeauth1", "name": "Order intake webhook auth" }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            { "id": "cfg1", "name": "UPSTREAM_API_URL", "type": "string", "value": "http://mock-api:3000/process" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "10000000-0000-4000-8000-000000000016",
+      "name": "Workflow Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [110, 300]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const crypto = require('crypto');\nconst item = $input.first();\nconst secret = $env.ORDER_INTAKE_HMAC_SECRET || '';\nconst raw = item.binary && item.binary.data\n  ? Buffer.from(item.binary.data.data, 'base64').toString('utf8')\n  : JSON.stringify(item.json.body || {});\nconst headers = item.json.headers || {};\nconst provided = String(headers['x-signature'] || '').replace(/^sha256=/, '').trim();\nconst expected = crypto.createHmac('sha256', secret).update(raw).digest('hex');\nlet authOk = false;\ntry {\n  authOk = provided.length === expected.length &&\n    crypto.timingSafeEqual(Buffer.from(provided, 'hex'), Buffer.from(expected, 'hex'));\n} catch (e) { authOk = false; }\nconst body = item.json.body || {};\nconst idempotencyKey = String(headers['idempotency-key'] || body.order_id || '');\nreturn [{ json: { authOk, idempotencyKey, order_id: body.order_id ?? null, amount: body.amount ?? null, body } }];"
+      },
+      "id": "10000000-0000-4000-8000-000000000002",
+      "name": "Verify HMAC",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "auth-cond",
+              "leftValue": "={{ $json.authOk }}",
+              "rightValue": "",
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "10000000-0000-4000-8000-000000000003",
+      "name": "Auth OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ ({ status: 'unauthorized', error: 'invalid or missing signature' }) }}",
+        "options": { "responseCode": 401 }
+      },
+      "id": "10000000-0000-4000-8000-000000000004",
+      "name": "Respond Unauthorized",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [660, 480]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const j = $input.first().json;\nconst body = j.body || {};\nconst errors = [];\nif (!body.order_id || typeof body.order_id !== 'string') errors.push('order_id is required and must be a string');\nif (typeof body.amount !== 'number' || !(body.amount > 0)) errors.push('amount is required and must be a positive number');\nreturn [{ json: { ...j, validationOk: errors.length === 0, errors } }];"
+      },
+      "id": "10000000-0000-4000-8000-000000000005",
+      "name": "Validate Order",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 220]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "valid-cond",
+              "leftValue": "={{ $json.validationOk }}",
+              "rightValue": "",
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "10000000-0000-4000-8000-000000000006",
+      "name": "Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [880, 220]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ ({ status: 'invalid', errors: $json.errors }) }}",
+        "options": { "responseCode": 400 }
+      },
+      "id": "10000000-0000-4000-8000-000000000007",
+      "name": "Respond Invalid",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [1100, 400]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH ins AS (INSERT INTO idempotency_keys (idempotency_key, order_id, execution_id) VALUES ($1, $2, $3) ON CONFLICT (idempotency_key) DO NOTHING RETURNING idempotency_key) SELECT EXISTS (SELECT 1 FROM ins) AS inserted;",
+        "options": {
+          "queryReplacement": "={{ [$('Verify HMAC').item.json.idempotencyKey, $('Verify HMAC').item.json.order_id, $execution.id] }}"
+        }
+      },
+      "id": "10000000-0000-4000-8000-000000000008",
+      "name": "Idempotency Insert",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [1100, 160],
+      "credentials": { "postgres": { "id": "pgcredential0001", "name": "Postgres order-intake" } }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "new-cond",
+              "leftValue": "={{ $json.inserted }}",
+              "rightValue": "",
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "10000000-0000-4000-8000-000000000009",
+      "name": "Is New?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [1320, 160]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ ({ status: 'duplicate', order_id: $('Verify HMAC').item.json.order_id }) }}",
+        "options": { "responseCode": 200 }
+      },
+      "id": "10000000-0000-4000-8000-000000000010",
+      "name": "Respond Duplicate",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [1540, 320]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Workflow Config').first().json.UPSTREAM_API_URL }}",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ order_id: $('Verify HMAC').item.json.order_id, amount: $('Verify HMAC').item.json.amount }) }}",
+        "options": { "timeout": 10000 }
+      },
+      "id": "10000000-0000-4000-8000-000000000011",
+      "name": "Call Upstream",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [1540, 100],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 500,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ ({ status: 'ok', order_id: $('Verify HMAC').item.json.order_id }) }}",
+        "options": { "responseCode": 200 }
+      },
+      "id": "10000000-0000-4000-8000-000000000012",
+      "name": "Respond Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [1760, 20]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO dead_letter (workflow, execution_id, order_id, reason, payload) VALUES ($1, $2, $3, $4, $5::jsonb)",
+        "options": {
+          "queryReplacement": "={{ ['01-order-intake', $execution.id, $('Verify HMAC').item.json.order_id, 'upstream call failed after retries', JSON.stringify($('Verify HMAC').item.json.body)] }}"
+        }
+      },
+      "id": "10000000-0000-4000-8000-000000000013",
+      "name": "DLQ Insert",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [1760, 220],
+      "credentials": { "postgres": { "id": "pgcredential0001", "name": "Postgres order-intake" } }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ ({ status: 'failed', order_id: $('Verify HMAC').item.json.order_id, detail: 'upstream unavailable; order dead-lettered' }) }}",
+        "options": { "responseCode": 502 }
+      },
+      "id": "10000000-0000-4000-8000-000000000014",
+      "name": "Respond Failure",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [1980, 220]
+    },
+    {
+      "parameters": {
+        "errorType": "errorMessage",
+        "errorMessage": "={{ 'order-intake: upstream failed after retries for order ' + $('Verify HMAC').item.json.order_id }}"
+      },
+      "id": "10000000-0000-4000-8000-000000000015",
+      "name": "Stop And Error",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [2200, 220]
+    }
+  ],
+  "connections": {
+    "Order Webhook": { "main": [[{ "node": "Workflow Config", "type": "main", "index": 0 }]] },
+    "Workflow Config": { "main": [[{ "node": "Verify HMAC", "type": "main", "index": 0 }]] },
+    "Verify HMAC": { "main": [[{ "node": "Auth OK?", "type": "main", "index": 0 }]] },
+    "Auth OK?": {
+      "main": [
+        [{ "node": "Validate Order", "type": "main", "index": 0 }],
+        [{ "node": "Respond Unauthorized", "type": "main", "index": 0 }]
+      ]
+    },
+    "Validate Order": { "main": [[{ "node": "Valid?", "type": "main", "index": 0 }]] },
+    "Valid?": {
+      "main": [
+        [{ "node": "Idempotency Insert", "type": "main", "index": 0 }],
+        [{ "node": "Respond Invalid", "type": "main", "index": 0 }]
+      ]
+    },
+    "Idempotency Insert": { "main": [[{ "node": "Is New?", "type": "main", "index": 0 }]] },
+    "Is New?": {
+      "main": [
+        [{ "node": "Call Upstream", "type": "main", "index": 0 }],
+        [{ "node": "Respond Duplicate", "type": "main", "index": 0 }]
+      ]
+    },
+    "Call Upstream": {
+      "main": [
+        [{ "node": "Respond Success", "type": "main", "index": 0 }],
+        [{ "node": "DLQ Insert", "type": "main", "index": 0 }]
+      ]
+    },
+    "DLQ Insert": { "main": [[{ "node": "Respond Failure", "type": "main", "index": 0 }]] },
+    "Respond Failure": { "main": [[{ "node": "Stop And Error", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1", "errorWorkflow": "globalerrhandler" },
+  "active": false
+}

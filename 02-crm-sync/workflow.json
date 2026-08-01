@@ -1,0 +1,778 @@
+{
+  "id": "crmsync000000001",
+  "name": "02-crm-sync",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 2,
+              "triggerAtMinute": 15
+            }
+          ]
+        }
+      },
+      "id": "20000000-0000-4000-8000-000000000001",
+      "name": "Nightly Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -220,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "20000000-0000-4000-8000-000000000023",
+      "name": "On-demand Re-run",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -220,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "20000000-0000-4000-8000-000000000024-cfg1",
+              "name": "CRM_DELTA_URL",
+              "type": "string",
+              "value": "http://mock-api:3000/crm/contacts"
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000024-cfg2",
+              "name": "CRM_SYNC_URL",
+              "type": "string",
+              "value": "http://mock-api:3000/crm/sync"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "20000000-0000-4000-8000-000000000024",
+      "name": "Workflow Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        -110,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO sync_watermark (workflow, cursor_value) VALUES ($1, $2) ON CONFLICT (workflow) DO UPDATE SET workflow = EXCLUDED.workflow RETURNING cursor_value;",
+        "options": {
+          "queryReplacement": "={{ ['02-crm-sync', '1970-01-01T00:00:00.000Z'] }}"
+        }
+      },
+      "id": "20000000-0000-4000-8000-000000000002",
+      "name": "Read Watermark",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        0,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "pgcredential0001",
+          "name": "Postgres order-intake"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO sync_audit (workflow, execution_id, cursor_before, status) VALUES ($1, $2, $3, 'running') RETURNING id;",
+        "options": {
+          "queryReplacement": "={{ ['02-crm-sync', $execution.id, $('Read Watermark').first().json.cursor_value] }}"
+        }
+      },
+      "id": "20000000-0000-4000-8000-000000000003",
+      "name": "Start Run Audit",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        220,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "pgcredential0001",
+          "name": "Postgres order-intake"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Workflow Config').first().json.CRM_DELTA_URL }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "since",
+              "value": "={{ $('Read Watermark').first().json.cursor_value }}"
+            },
+            {
+              "name": "limit",
+              "value": "250"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "20000000-0000-4000-8000-000000000004",
+      "name": "Fetch Delta",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        440,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 500,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "20000000-0000-4000-8000-000000000005-cond",
+              "leftValue": "={{ $json.count > 0 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "20000000-0000-4000-8000-000000000005",
+      "name": "Any Changes?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        660,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// One item per changed contact, carrying its cursor alongside the payload.\n// The cursor travels with the item all the way to the watermark decision, so\n// that decision never has to guess which record a result belonged to.\nconst res = $input.first().json;\nconst items = Array.isArray(res.items) ? res.items : [];\nreturn items.map((c) => ({ json: { id: c.id, cursor: c.updated_at, contact: c } }));"
+      },
+      "id": "20000000-0000-4000-8000-000000000006",
+      "name": "Prepare Contacts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "20000000-0000-4000-8000-000000000007",
+      "name": "Loop Over Contacts",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1100,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Workflow Config').first().json.CRM_SYNC_URL }}",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.contact) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "20000000-0000-4000-8000-000000000008",
+      "name": "Sync Contact",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1320,
+        240
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Re-emit the contact as a RESULT record. Batch size is 1, so the loop node\n// holds exactly the contact this response belongs to — no positional\n// guesswork, and no dependence on paired-item plumbing surviving an error.\nconst src = $(\"Loop Over Contacts\").first().json;\nreturn [{ json: { id: src.id, cursor: src.cursor, ok: true } }];"
+      },
+      "id": "20000000-0000-4000-8000-000000000009",
+      "name": "Mark Synced",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// The error branch carries n8n's error item; the contact context comes from\n// the loop node. Both are captured here once, so the dead-letter row and the\n// result record cannot disagree about what failed or why.\nconst src = $(\"Loop Over Contacts\").first().json;\nconst e = ($input.first().json || {}).error || {};\nconst reason = String(e.message || e.description || \"contact sync failed after retries\");\nreturn [{ json: { id: src.id, cursor: src.cursor, ok: false, reason, contact: src.contact } }];"
+      },
+      "id": "20000000-0000-4000-8000-000000000010",
+      "name": "Describe Failure",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO dead_letter (workflow, execution_id, order_id, reason, payload) VALUES ($1, $2, $3, $4, $5::jsonb) RETURNING id;",
+        "options": {
+          "queryReplacement": "={{ ['02-crm-sync', $execution.id, $json.id, $json.reason, JSON.stringify($json.contact)] }}"
+        }
+      },
+      "id": "20000000-0000-4000-8000-000000000011",
+      "name": "Dead-letter Contact",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1760,
+        340
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "pgcredential0001",
+          "name": "Postgres order-intake"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Emit the failure as a RESULT record so it re-enters the loop alongside the\n// successes. The watermark decision needs to see failures — a failure that\n// never reaches it is exactly how a cursor jumps over unprocessed records.\nconst f = $(\"Describe Failure\").first().json;\nreturn [{ json: { id: f.id, cursor: f.cursor, ok: false, reason: f.reason } }];"
+      },
+      "id": "20000000-0000-4000-8000-000000000012",
+      "name": "Confirm Dead-lettered",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 1,
+        "unit": "seconds"
+      },
+      "id": "20000000-0000-4000-8000-000000000013",
+      "name": "Pace Between Batches",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2200,
+        240
+      ],
+      "webhookId": "crm-sync-pace"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Nothing changed since the last cursor. This is a healthy outcome, not an\n// absence of one: it still records a run and still refreshes the heartbeat,\n// so an idle sync is never mistaken for a stalled one.\nreturn [{ json: { outcome: \"no_changes\" } }];"
+      },
+      "id": "20000000-0000-4000-8000-000000000014",
+      "name": "No Changes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// The delta fetch itself failed after retries. No contact was read, so the\n// watermark must not move by even one record.\nconst e = ($input.first().json || {}).error || {};\nreturn [{ json: { outcome: \"fetch_failed\", reason: String(e.message || e.description || \"delta fetch failed after retries\") } }];"
+      },
+      "id": "20000000-0000-4000-8000-000000000015",
+      "name": "Fetch Failed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// THE WATERMARK DECISION.\n//\n// The cursor advances to the last contact that succeeded with NO failure\n// before it — not to the highest successful cursor, and never to the end of\n// the fetched page. The loop below therefore STOPS at the first failure\n// rather than skipping past it.\n//\n// Why the distinction matters: if contact 3 fails and contact 4 succeeds,\n// advancing to 4 means contact 3 is never fetched again. Nothing errors,\n// nothing is logged, and the record is simply gone from the sync forever.\n// Holding at 2 costs one re-read of contact 4 on the next run, which is\n// harmless because the write is idempotent.\nconst items = $input.all().map((i) => i.json || {});\nconst cursorBefore = $(\"Read Watermark\").first().json.cursor_value;\nconst first = items[0] || {};\n\nif (first.outcome === \"fetch_failed\") {\n  return [{ json: { outcome: \"fetch_failed\", items_read: 0, items_synced: 0, items_failed: 0,\n    cursor_before: cursorBefore, cursor_after: cursorBefore, status: \"failed\",\n    detail: String(first.reason || \"delta fetch failed\") } }];\n}\n\nif (first.outcome === \"no_changes\") {\n  return [{ json: { outcome: \"no_changes\", items_read: 0, items_synced: 0, items_failed: 0,\n    cursor_before: cursorBefore, cursor_after: cursorBefore, status: \"ok\",\n    detail: \"no changes since the last run\" } }];\n}\n\nconst results = items\n  .filter((r) => r && r.cursor)\n  .sort((a, b) => String(a.cursor).localeCompare(String(b.cursor)));\n\nlet lastGood = null;\nfor (const r of results) {\n  if (!r.ok) break;   // <-- stop at the first failure; do NOT skip over it\n  lastGood = r.cursor;\n}\n\nconst synced = results.filter((r) => r.ok).length;\nconst failed = results.length - synced;\nreturn [{ json: {\n  outcome: \"processed\",\n  items_read: results.length,\n  items_synced: synced,\n  items_failed: failed,\n  cursor_before: cursorBefore,\n  cursor_after: lastGood || cursorBefore,\n  status: failed === 0 ? \"ok\" : \"partial\",\n  detail: failed === 0\n    ? \"all contacts synced\"\n    : failed + \" contact(s) dead-lettered; watermark held at the last good cursor\",\n} }];"
+      },
+      "id": "20000000-0000-4000-8000-000000000016",
+      "name": "Summarize Run",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE sync_watermark SET cursor_value = CASE WHEN cursor_value IS NULL OR $2 > cursor_value THEN $2 ELSE cursor_value END, updated_at = now() WHERE workflow = $1 RETURNING cursor_value;",
+        "options": {
+          "queryReplacement": "={{ ['02-crm-sync', $('Summarize Run').first().json.cursor_after] }}"
+        }
+      },
+      "id": "20000000-0000-4000-8000-000000000017",
+      "name": "Advance Watermark",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        2640,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "pgcredential0001",
+          "name": "Postgres order-intake"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE sync_audit SET finished_at = now(), items_read = $2::int, items_synced = $3::int, items_failed = $4::int, cursor_after = $5, status = $6 WHERE id = $1::bigint RETURNING id, status;",
+        "options": {
+          "queryReplacement": "={{ (() => { const s = $('Summarize Run').first().json; return [$('Start Run Audit').first().json.id, s.items_read, s.items_synced, s.items_failed, s.cursor_after, s.status]; })() }}"
+        }
+      },
+      "id": "20000000-0000-4000-8000-000000000018",
+      "name": "Complete Run Audit",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        2860,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "pgcredential0001",
+          "name": "Postgres order-intake"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO sync_heartbeat (workflow, last_run_at, last_success_at, status, detail) VALUES ($1, now(), CASE WHEN $2 = 'ok' THEN now() ELSE NULL END, $2, $3) ON CONFLICT (workflow) DO UPDATE SET last_run_at = now(), last_success_at = CASE WHEN $2 = 'ok' THEN now() ELSE sync_heartbeat.last_success_at END, status = $2, detail = $3 RETURNING status;",
+        "options": {
+          "queryReplacement": "={{ (() => { const s = $('Summarize Run').first().json; return ['02-crm-sync', s.status, s.detail]; })() }}"
+        }
+      },
+      "id": "20000000-0000-4000-8000-000000000019",
+      "name": "Update Heartbeat",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        3080,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "pgcredential0001",
+          "name": "Postgres order-intake"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "20000000-0000-4000-8000-000000000020-cond",
+              "leftValue": "={{ $json.status === 'ok' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "20000000-0000-4000-8000-000000000020",
+      "name": "Run OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        3300,
+        300
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "20000000-0000-4000-8000-000000000021",
+      "name": "Sync Complete",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        3520,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "errorType": "errorMessage",
+        "errorMessage": "={{ '02-crm-sync: ' + $('Summarize Run').first().json.status + ' — ' + $('Summarize Run').first().json.detail }}"
+      },
+      "id": "20000000-0000-4000-8000-000000000022",
+      "name": "Stop And Error",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        3520,
+        400
+      ]
+    }
+  ],
+  "connections": {
+    "Nightly Trigger": {
+      "main": [
+        [
+          {
+            "node": "Workflow Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "On-demand Re-run": {
+      "main": [
+        [
+          {
+            "node": "Workflow Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Workflow Config": {
+      "main": [
+        [
+          {
+            "node": "Read Watermark",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Watermark": {
+      "main": [
+        [
+          {
+            "node": "Start Run Audit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start Run Audit": {
+      "main": [
+        [
+          {
+            "node": "Fetch Delta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Delta": {
+      "main": [
+        [
+          {
+            "node": "Any Changes?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fetch Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any Changes?": {
+      "main": [
+        [
+          {
+            "node": "Prepare Contacts",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Changes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Contacts": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Contacts": {
+      "main": [
+        [
+          {
+            "node": "Summarize Run",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sync Contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sync Contact": {
+      "main": [
+        [
+          {
+            "node": "Mark Synced",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Describe Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Synced": {
+      "main": [
+        [
+          {
+            "node": "Pace Between Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Describe Failure": {
+      "main": [
+        [
+          {
+            "node": "Dead-letter Contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dead-letter Contact": {
+      "main": [
+        [
+          {
+            "node": "Confirm Dead-lettered",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confirm Dead-lettered": {
+      "main": [
+        [
+          {
+            "node": "Pace Between Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pace Between Batches": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "No Changes": {
+      "main": [
+        [
+          {
+            "node": "Summarize Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Failed": {
+      "main": [
+        [
+          {
+            "node": "Summarize Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize Run": {
+      "main": [
+        [
+          {
+            "node": "Advance Watermark",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Advance Watermark": {
+      "main": [
+        [
+          {
+            "node": "Complete Run Audit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Complete Run Audit": {
+      "main": [
+        [
+          {
+            "node": "Update Heartbeat",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Heartbeat": {
+      "main": [
+        [
+          {
+            "node": "Run OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run OK?": {
+      "main": [
+        [
+          {
+            "node": "Sync Complete",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Stop And Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "globalerrhandler",
+    "timezone": "Australia/Brisbane"
+  },
+  "active": false
+}

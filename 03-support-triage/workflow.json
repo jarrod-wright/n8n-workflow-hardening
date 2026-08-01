@@ -1,0 +1,711 @@
+{
+  "id": "supporttriage001",
+  "name": "03-support-triage",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "authentication": "headerAuth",
+        "path": "support-triage",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "50000000-0000-4000-8000-000000000001",
+      "name": "Ticket Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        300
+      ],
+      "webhookId": "support-triage-webhook",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "supporttriageau1",
+          "name": "Support triage webhook auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const crypto = require('crypto');\nconst item = $input.first();\nconst secret = $env.ORDER_INTAKE_HMAC_SECRET || '';\nconst raw = item.binary && item.binary.data\n  ? Buffer.from(item.binary.data.data, 'base64').toString('utf8')\n  : JSON.stringify(item.json.body || {});\nconst headers = item.json.headers || {};\nconst provided = String(headers['x-signature'] || '').replace(/^sha256=/, '').trim();\nconst expected = crypto.createHmac('sha256', secret).update(raw).digest('hex');\nlet authOk = false;\ntry {\n  authOk = provided.length === expected.length &&\n    crypto.timingSafeEqual(Buffer.from(provided, 'hex'), Buffer.from(expected, 'hex'));\n} catch (e) { authOk = false; }\nreturn [{ json: { authOk, body: item.json.body || {} } }];"
+      },
+      "id": "50000000-0000-4000-8000-000000000002",
+      "name": "Verify HMAC",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "50000000-0000-4000-8000-000000000003-cond",
+              "leftValue": "={{ $json.authOk }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "50000000-0000-4000-8000-000000000003",
+      "name": "Auth OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ ({ status: 'unauthorized', error: 'invalid or missing signature' }) }}",
+        "options": {
+          "responseCode": 401
+        }
+      },
+      "id": "50000000-0000-4000-8000-000000000004",
+      "name": "Respond Unauthorized",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        660,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Normalise the ticket once, so every downstream node — both provider\n// chains, both parsers, the human queue and the dead-letter row — is\n// looking at the same fields rather than re-deriving them.\nconst body = $json.body || {};\nconst ticketId = String(body.ticket_id || body.id || '').trim();\nconst subject = String(body.subject || '').trim();\nconst text = String(body.body || body.message || '').trim();\nconst errors = [];\nif (!ticketId) errors.push('ticket_id is required');\nif (!subject && !text) errors.push('the ticket needs a subject or a body');\nreturn [{ json: {\n  ticket_id: ticketId,\n  subject,\n  body: text,\n  valid_input: errors.length === 0,\n  input_errors: errors,\n  prompt: 'Triage this support ticket.\\n\\nSubject: ' + subject + '\\n\\nBody: ' + text,\n} }];"
+      },
+      "id": "50000000-0000-4000-8000-000000000005",
+      "name": "Build Ticket",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "50000000-0000-4000-8000-000000000006-cond",
+              "leftValue": "={{ $json.valid_input }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "50000000-0000-4000-8000-000000000006",
+      "name": "Ticket Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        880,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ ({ status: 'invalid', errors: $json.input_errors }) }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "50000000-0000-4000-8000-000000000007",
+      "name": "Respond Invalid",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1100,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.prompt }}",
+        "hasOutputParser": false,
+        "needsFallback": false,
+        "options": {
+          "systemMessage": "You are a support-ticket triage assistant. Reply with a SINGLE JSON object and nothing else. Fields: category (billing|technical|account|other), urgency (low|normal|high|critical), summary (one line, max 280 characters), requires_human (boolean). Do not wrap the JSON in markdown fences and do not add commentary.",
+          "maxIterations": 3,
+          "returnIntermediateSteps": false
+        }
+      },
+      "id": "50000000-0000-4000-8000-000000000008",
+      "name": "Triage Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        1100,
+        160
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1000,
+      "onError": "stopWorkflow"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "id",
+          "value": "mock-triage-1"
+        },
+        "responsesApiEnabled": false,
+        "options": {
+          "timeout": 20000,
+          "maxRetries": 1,
+          "temperature": 0
+        }
+      },
+      "id": "50000000-0000-4000-8000-000000000009",
+      "name": "Primary Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        1040,
+        400
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "llmprimary000001",
+          "name": "LLM primary"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const PROVIDER = 'primary';\n\n// -------------------------------------------------------------------------\n// DETERMINISTIC PARSER. No model is involved in deciding whether a model's\n// answer is usable — that decision is made here, by code, every time, the same\n// way. An \"auto-fixing\" parser that asks another model to repair the first\n// model's output turns one non-deterministic step into two.\n// -------------------------------------------------------------------------\n\nconst SCHEMA = {\n    \"$schema\": \"https://json-schema.org/draft/2020-12/schema\",\n    \"$id\": \"https://example.invalid/schemas/triage-output.schema.json\",\n    \"title\": \"triage-output\",\n    \"description\": \"The ONLY shape the support-triage workflow will act on. A model response is not trusted because it parsed — it is trusted because it conforms to this. Kept as a file so the contract is reviewable and diffable on its own; the workflow's parser embeds a copy, and a test asserts the two never drift.\",\n    \"type\": \"object\",\n    \"additionalProperties\": false,\n    \"required\": [\n      \"category\",\n      \"urgency\",\n      \"summary\",\n      \"requires_human\"\n    ],\n    \"properties\": {\n      \"category\": {\n        \"type\": \"string\",\n        \"description\": \"Routing destination. A closed set: an unknown category cannot be routed, so it must fail validation rather than be forwarded to a queue that does not exist.\",\n        \"enum\": [\n          \"billing\",\n          \"technical\",\n          \"account\",\n          \"other\"\n        ]\n      },\n      \"urgency\": {\n        \"type\": \"string\",\n        \"description\": \"Closed set. A model that returns 7 or \\\"very high\\\" here must be rejected, not coerced — coercion is how a critical ticket silently becomes a normal one.\",\n        \"enum\": [\n          \"low\",\n          \"normal\",\n          \"high\",\n          \"critical\"\n        ]\n      },\n      \"summary\": {\n        \"type\": \"string\",\n        \"description\": \"One-line summary shown to a human. Bounded so a runaway response cannot be written into a UI field verbatim.\",\n        \"minLength\": 1,\n        \"maxLength\": 280\n      },\n      \"requires_human\": {\n        \"type\": \"boolean\",\n        \"description\": \"Strictly boolean. \\\"probably\\\" is not a decision an automated router can act on.\"\n      }\n    }\n  };\n\n// Strip the wrapping a chat model puts around JSON. Handles a fenced block, and\n// prose on either side of one, because those are what models actually return —\n// not because the prompt asked for them.\nfunction extractJson(text) {\n  let t = String(text === null || text === undefined ? '' : text).trim();\n  const fenced = t.match(/```(?:json)?\\s*([\\s\\S]*?)\\s*```/i);\n  if (fenced) t = fenced[1].trim();\n  const first = t.indexOf('{');\n  const last = t.lastIndexOf('}');\n  if (first !== -1 && last > first) t = t.slice(first, last + 1);\n  return t.trim();\n}\n\n// A small, explicit validator for exactly the subset of JSON Schema this\n// contract uses. Explicit beats a dependency here: the rules a response is held\n// to are readable in the same file that applies them.\nfunction validate(value, schema, path) {\n  const where = path ? path + ': ' : '';\n  const errors = [];\n\n  if (schema.type === 'object') {\n    if (value === null || typeof value !== 'object' || Array.isArray(value)) {\n      return [where + 'expected an object'];\n    }\n    for (const key of schema.required || []) {\n      if (!(key in value)) errors.push(where + 'missing required field \"' + key + '\"');\n    }\n    if (schema.additionalProperties === false) {\n      for (const key of Object.keys(value)) {\n        if (!(key in (schema.properties || {}))) {\n          errors.push(where + 'unexpected field \"' + key + '\"');\n        }\n      }\n    }\n    for (const key of Object.keys(schema.properties || {})) {\n      if (key in value) {\n        errors.push(...validate(value[key], schema.properties[key], path ? path + '.' + key : key));\n      }\n    }\n    return errors;\n  }\n\n  if (schema.type === 'string') {\n    if (typeof value !== 'string') return [where + 'expected a string, got ' + typeof value];\n    if (schema.enum && schema.enum.indexOf(value) === -1) {\n      errors.push(where + 'must be one of [' + schema.enum.join(', ') + '], got \"' + value + '\"');\n    }\n    if (schema.minLength !== undefined && value.length < schema.minLength) {\n      errors.push(where + 'must be at least ' + schema.minLength + ' character(s)');\n    }\n    if (schema.maxLength !== undefined && value.length > schema.maxLength) {\n      errors.push(where + 'must be at most ' + schema.maxLength + ' characters');\n    }\n    return errors;\n  }\n\n  if (schema.type === 'boolean') {\n    if (typeof value !== 'boolean') return [where + 'expected a boolean, got ' + typeof value];\n    return errors;\n  }\n\n  return errors;\n}\n\nconst ticket = $('Build Ticket').first().json;\nconst j = $input.first().json || {};\n// The agent answers on `output`, the chain on `text`.\nconst raw = j.output !== undefined ? j.output : (j.text !== undefined ? j.text : '');\n\nlet triage = null;\nlet errors = [];\nconst candidate = extractJson(raw);\n\nif (!candidate) {\n  errors = ['the model returned an empty response'];\n} else {\n  try {\n    triage = JSON.parse(candidate);\n  } catch (e) {\n    errors = ['response is not valid JSON: ' + e.message];\n  }\n  if (triage !== null) errors = validate(triage, SCHEMA, '');\n}\n\nreturn [{ json: {\n  ticket_id: ticket.ticket_id,\n  provider: PROVIDER,\n  valid: errors.length === 0,\n  errors,\n  triage,\n  raw: String(raw).slice(0, 2000),\n} }];"
+      },
+      "id": "50000000-0000-4000-8000-000000000010",
+      "name": "Parse Triage",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "50000000-0000-4000-8000-000000000011-cond",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "50000000-0000-4000-8000-000000000011",
+      "name": "Triage Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1540,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ 'The previous attempt to triage this ticket produced an unusable response (' + $json.errors.join('; ') + '). Reply with ONLY the JSON object.\\n\\n' + $('Build Ticket').first().json.prompt }}",
+        "needsFallback": false,
+        "messages": {
+          "messageValues": [
+            {
+              "type": "SystemMessagePromptTemplate",
+              "message": "You are a support-ticket triage assistant. Reply with a SINGLE JSON object and nothing else. Fields: category (billing|technical|account|other), urgency (low|normal|high|critical), summary (one line, max 280 characters), requires_human (boolean). Do not wrap the JSON in markdown fences and do not add commentary."
+            }
+          ]
+        }
+      },
+      "id": "50000000-0000-4000-8000-000000000012",
+      "name": "Fallback Triage",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        1760,
+        340
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "model": "deepseek-chat",
+        "options": {
+          "timeout": 20000,
+          "maxRetries": 1,
+          "temperature": 0
+        }
+      },
+      "id": "50000000-0000-4000-8000-000000000013",
+      "name": "Fallback Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatDeepSeek",
+      "typeVersion": 1,
+      "position": [
+        1700,
+        560
+      ],
+      "credentials": {
+        "deepSeekApi": {
+          "id": "llmfallback00001",
+          "name": "LLM fallback"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const PROVIDER = 'fallback';\n\n// -------------------------------------------------------------------------\n// DETERMINISTIC PARSER. No model is involved in deciding whether a model's\n// answer is usable — that decision is made here, by code, every time, the same\n// way. An \"auto-fixing\" parser that asks another model to repair the first\n// model's output turns one non-deterministic step into two.\n// -------------------------------------------------------------------------\n\nconst SCHEMA = {\n    \"$schema\": \"https://json-schema.org/draft/2020-12/schema\",\n    \"$id\": \"https://example.invalid/schemas/triage-output.schema.json\",\n    \"title\": \"triage-output\",\n    \"description\": \"The ONLY shape the support-triage workflow will act on. A model response is not trusted because it parsed — it is trusted because it conforms to this. Kept as a file so the contract is reviewable and diffable on its own; the workflow's parser embeds a copy, and a test asserts the two never drift.\",\n    \"type\": \"object\",\n    \"additionalProperties\": false,\n    \"required\": [\n      \"category\",\n      \"urgency\",\n      \"summary\",\n      \"requires_human\"\n    ],\n    \"properties\": {\n      \"category\": {\n        \"type\": \"string\",\n        \"description\": \"Routing destination. A closed set: an unknown category cannot be routed, so it must fail validation rather than be forwarded to a queue that does not exist.\",\n        \"enum\": [\n          \"billing\",\n          \"technical\",\n          \"account\",\n          \"other\"\n        ]\n      },\n      \"urgency\": {\n        \"type\": \"string\",\n        \"description\": \"Closed set. A model that returns 7 or \\\"very high\\\" here must be rejected, not coerced — coercion is how a critical ticket silently becomes a normal one.\",\n        \"enum\": [\n          \"low\",\n          \"normal\",\n          \"high\",\n          \"critical\"\n        ]\n      },\n      \"summary\": {\n        \"type\": \"string\",\n        \"description\": \"One-line summary shown to a human. Bounded so a runaway response cannot be written into a UI field verbatim.\",\n        \"minLength\": 1,\n        \"maxLength\": 280\n      },\n      \"requires_human\": {\n        \"type\": \"boolean\",\n        \"description\": \"Strictly boolean. \\\"probably\\\" is not a decision an automated router can act on.\"\n      }\n    }\n  };\n\n// Strip the wrapping a chat model puts around JSON. Handles a fenced block, and\n// prose on either side of one, because those are what models actually return —\n// not because the prompt asked for them.\nfunction extractJson(text) {\n  let t = String(text === null || text === undefined ? '' : text).trim();\n  const fenced = t.match(/```(?:json)?\\s*([\\s\\S]*?)\\s*```/i);\n  if (fenced) t = fenced[1].trim();\n  const first = t.indexOf('{');\n  const last = t.lastIndexOf('}');\n  if (first !== -1 && last > first) t = t.slice(first, last + 1);\n  return t.trim();\n}\n\n// A small, explicit validator for exactly the subset of JSON Schema this\n// contract uses. Explicit beats a dependency here: the rules a response is held\n// to are readable in the same file that applies them.\nfunction validate(value, schema, path) {\n  const where = path ? path + ': ' : '';\n  const errors = [];\n\n  if (schema.type === 'object') {\n    if (value === null || typeof value !== 'object' || Array.isArray(value)) {\n      return [where + 'expected an object'];\n    }\n    for (const key of schema.required || []) {\n      if (!(key in value)) errors.push(where + 'missing required field \"' + key + '\"');\n    }\n    if (schema.additionalProperties === false) {\n      for (const key of Object.keys(value)) {\n        if (!(key in (schema.properties || {}))) {\n          errors.push(where + 'unexpected field \"' + key + '\"');\n        }\n      }\n    }\n    for (const key of Object.keys(schema.properties || {})) {\n      if (key in value) {\n        errors.push(...validate(value[key], schema.properties[key], path ? path + '.' + key : key));\n      }\n    }\n    return errors;\n  }\n\n  if (schema.type === 'string') {\n    if (typeof value !== 'string') return [where + 'expected a string, got ' + typeof value];\n    if (schema.enum && schema.enum.indexOf(value) === -1) {\n      errors.push(where + 'must be one of [' + schema.enum.join(', ') + '], got \"' + value + '\"');\n    }\n    if (schema.minLength !== undefined && value.length < schema.minLength) {\n      errors.push(where + 'must be at least ' + schema.minLength + ' character(s)');\n    }\n    if (schema.maxLength !== undefined && value.length > schema.maxLength) {\n      errors.push(where + 'must be at most ' + schema.maxLength + ' characters');\n    }\n    return errors;\n  }\n\n  if (schema.type === 'boolean') {\n    if (typeof value !== 'boolean') return [where + 'expected a boolean, got ' + typeof value];\n    return errors;\n  }\n\n  return errors;\n}\n\nconst ticket = $('Build Ticket').first().json;\nconst j = $input.first().json || {};\n// The agent answers on `output`, the chain on `text`.\nconst raw = j.output !== undefined ? j.output : (j.text !== undefined ? j.text : '');\n\nlet triage = null;\nlet errors = [];\nconst candidate = extractJson(raw);\n\nif (!candidate) {\n  errors = ['the model returned an empty response'];\n} else {\n  try {\n    triage = JSON.parse(candidate);\n  } catch (e) {\n    errors = ['response is not valid JSON: ' + e.message];\n  }\n  if (triage !== null) errors = validate(triage, SCHEMA, '');\n}\n\nreturn [{ json: {\n  ticket_id: ticket.ticket_id,\n  provider: PROVIDER,\n  valid: errors.length === 0,\n  errors,\n  triage,\n  raw: String(raw).slice(0, 2000),\n} }];"
+      },
+      "id": "50000000-0000-4000-8000-000000000014",
+      "name": "Parse Fallback",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "50000000-0000-4000-8000-000000000015-cond",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "50000000-0000-4000-8000-000000000015",
+      "name": "Fallback Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2200,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO triage_result (ticket_id, execution_id, category, urgency, summary, requires_human, provider) VALUES ($1, $2, $3, $4, $5, $6::boolean, $7) ON CONFLICT (ticket_id) DO UPDATE SET category = EXCLUDED.category, urgency = EXCLUDED.urgency, summary = EXCLUDED.summary, requires_human = EXCLUDED.requires_human, provider = EXCLUDED.provider, execution_id = EXCLUDED.execution_id, updated_at = now() RETURNING ticket_id, category, urgency, requires_human, provider;",
+        "options": {
+          "queryReplacement": "={{ (() => { const r = $json; return [r.ticket_id, $execution.id, r.triage.category, r.triage.urgency, r.triage.summary, r.triage.requires_human, r.provider]; })() }}"
+        }
+      },
+      "id": "50000000-0000-4000-8000-000000000016",
+      "name": "Record Triage",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        2420,
+        160
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "pgcredential0001",
+          "name": "Postgres order-intake"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ ({ status: 'triaged', ticket_id: $json.ticket_id, category: $json.category, urgency: $json.urgency, requires_human: $json.requires_human, provider: $json.provider }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "50000000-0000-4000-8000-000000000017",
+      "name": "Respond Triaged",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        2640,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Both ways of failing arrive here: the fallback returned something\n// unusable, or the fallback provider was unreachable. Normalising them\n// into one shape means the human queue, the dead-letter row and the\n// response cannot disagree about what happened.\nconst t = $('Build Ticket').first().json;\nconst primary = $('Parse Triage').first().json;\nconst j = $input.first().json || {};\n// A parsed result carries `valid`; an error item does not.\nconst providerFailed = j.valid === undefined;\nconst fallbackErrors = providerFailed\n  ? ['fallback provider unavailable: ' + String((j.error && j.error.message) || 'unknown error')]\n  : (j.errors || []);\nreturn [{ json: {\n  ticket_id: t.ticket_id,\n  reason: (providerFailed\n    ? 'the fallback provider was unavailable'\n    : 'no provider returned a usable triage') + ': ' + fallbackErrors.join('; '),\n  raw: providerFailed ? '' : String(j.raw || ''),\n  primary_errors: primary.errors || [],\n  fallback_errors: fallbackErrors,\n  subject: t.subject,\n  body: t.body,\n} }];"
+      },
+      "id": "50000000-0000-4000-8000-000000000021",
+      "name": "Escalate To Human",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO human_review_queue (ticket_id, execution_id, reason, raw_output, payload) VALUES ($1, $2, $3, $4, $5::jsonb) RETURNING id;",
+        "options": {
+          "queryReplacement": "={{ (() => { const r = $json; return [r.ticket_id, $execution.id, r.reason, r.raw, JSON.stringify({ subject: r.subject, body: r.body })]; })() }}"
+        }
+      },
+      "id": "50000000-0000-4000-8000-000000000018",
+      "name": "Queue For Human",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        2420,
+        520
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "pgcredential0001",
+          "name": "Postgres order-intake"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO dead_letter (workflow, execution_id, order_id, reason, payload) VALUES ($1, $2, $3, $4, $5::jsonb) RETURNING id;",
+        "options": {
+          "queryReplacement": "={{ (() => { const r = $('Escalate To Human').first().json; return ['03-support-triage', $execution.id, r.ticket_id, 'automated triage produced no usable result', JSON.stringify({ subject: r.subject, body: r.body, primary_errors: r.primary_errors, fallback_errors: r.fallback_errors })]; })() }}"
+        }
+      },
+      "id": "50000000-0000-4000-8000-000000000019",
+      "name": "Dead-letter Ticket",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        2640,
+        520
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "pgcredential0001",
+          "name": "Postgres order-intake"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ ({ status: 'queued_for_human', ticket_id: $('Escalate To Human').first().json.ticket_id, detail: 'automated triage could not produce a usable result; a person will review it' }) }}",
+        "options": {
+          "responseCode": 202
+        }
+      },
+      "id": "50000000-0000-4000-8000-000000000020",
+      "name": "Respond Needs Human",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        2860,
+        520
+      ]
+    }
+  ],
+  "connections": {
+    "Ticket Webhook": {
+      "main": [
+        [
+          {
+            "node": "Verify HMAC",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify HMAC": {
+      "main": [
+        [
+          {
+            "node": "Auth OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auth OK?": {
+      "main": [
+        [
+          {
+            "node": "Build Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Unauthorized",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Ticket": {
+      "main": [
+        [
+          {
+            "node": "Ticket Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ticket Valid?": {
+      "main": [
+        [
+          {
+            "node": "Triage Agent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Invalid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Triage Agent": {
+      "main": [
+        [
+          {
+            "node": "Parse Triage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Triage": {
+      "main": [
+        [
+          {
+            "node": "Triage Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Triage Valid?": {
+      "main": [
+        [
+          {
+            "node": "Record Triage",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fallback Triage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fallback Triage": {
+      "main": [
+        [
+          {
+            "node": "Parse Fallback",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Escalate To Human",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Fallback": {
+      "main": [
+        [
+          {
+            "node": "Fallback Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fallback Valid?": {
+      "main": [
+        [
+          {
+            "node": "Record Triage",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Escalate To Human",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record Triage": {
+      "main": [
+        [
+          {
+            "node": "Respond Triaged",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Escalate To Human": {
+      "main": [
+        [
+          {
+            "node": "Queue For Human",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Queue For Human": {
+      "main": [
+        [
+          {
+            "node": "Dead-letter Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dead-letter Ticket": {
+      "main": [
+        [
+          {
+            "node": "Respond Needs Human",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Primary Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Triage Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fallback Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Fallback Triage",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "globalerrhandler",
+    "timezone": "Australia/Brisbane"
+  },
+  "active": false
+}
