@@ -1,5 +1,15 @@
 # n8n Production Hardening
 
+**Workflow plane.** Six n8n workflows, three worked scenarios and three shared mechanisms, plus a 13-rule static linter: authenticated ingress, exactly-once processing, retry to dead-letter to replay, resumable syncs, deterministic handling of model output.
+
+**Verifiable in a minute.** `package.json` declares no dependencies, so this runs on a clean checkout with nothing installed:
+
+```bash
+node linter/cli.js lint 01-order-intake/workflow.json
+```
+
+Every rule traces to a named failure mode, and every claim is proven by a test that causes that failure on purpose. Start at [docs/testing.md](docs/testing.md).
+
 A worked reference for taking n8n workflows from "it runs on my machine" to
 something that survives production: authenticated ingress, exactly-once
 processing, bounded retries with a dead-letter path and a replay, resumable
@@ -28,7 +38,7 @@ says plainly which.
 |---|---|---|
 | **Workflow** ← *you are here* | The automations themselves: authenticated ingress, idempotency, bounded retries, dead-lettering, model-output validation, liveness | **this repository** |
 | **Stack and container** | Compose topology, reverse proxy and TLS termination, queue mode, secret delivery, capability drops, database privileges | [`n8n-hardened-reference`](https://github.com/jarrod-wright/n8n-hardened-reference) |
-| **Host and OS** | CIS Ubuntu 24.04 Level 1 — Server, SSH policy, kernel and sysctl parameters, host firewall, auditd, patch posture | `vps-hardening-reference` — in development, not yet published |
+| **Host and OS** | CIS Ubuntu 24.04 Level 1, Server profile: SSH policy, kernel and sysctl parameters, host firewall, auditd, patch posture | `vps-hardening-reference`, in development, not yet published |
 
 They compose without overlapping, and each is incomplete on its own. Hardened
 workflows on an unhardened host leave correct logic behind an open door. A
@@ -184,3 +194,13 @@ date each claim was observed:
 
 [MIT](LICENSE) — see [`LICENSE`](LICENSE). To report a vulnerability, see
 [`SECURITY.md`](SECURITY.md).
+
+---
+
+## Who built this
+
+Jarrod Wright, working as **The Certainty Engineer**. I work on the reliability of self-hosted n8n across three planes: the workflows, the container stack they run on, and the host underneath. These repositories are the reference implementations I work from.
+
+Engagements usually take one of three shapes: a fixed-scope audit of an existing deployment against named failure modes, a hardening pass that closes what the audit finds, or a migration of live automations onto a hardened stack. Findings come back as evidence you can re-run, in the same form as the tests here.
+
+Reachable at **jarr.wright@gmail.com**.
