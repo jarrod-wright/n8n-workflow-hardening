@@ -168,7 +168,14 @@ services:
       - N8N_ENCRYPTION_KEY_FILE=/run/secrets/n8n_encryption_key
       - DB_POSTGRESDB_PASSWORD_FILE=/run/secrets/db_password
       - QUEUE_BULL_REDIS_PASSWORD_FILE=/run/secrets/broker_password
-      - N8N_RUNNERS_ENABLED=true
+      # N8N_RUNNERS_ENABLED is deliberately NOT set. It is deprecated upstream
+      # (n8n-io/n8n packages/cli/src/deprecation/deprecation.service.ts:
+      # `{ envVar: 'N8N_RUNNERS_ENABLED', message: SAFE_TO_REMOVE }` — "Remove
+      # this environment variable; it is no longer needed."), confirmed by live
+      # source probe of n8n-io/n8n on 2026-07-26. Setting a deprecated variable
+      # on a 2.32.3 pin is exactly the kind of stale leftover this exhibit exists
+      # to catch, so it is removed rather than carried. N8N_RUNNERS_MODE=internal
+      # alone selects the in-process task runner this stack uses.
       - N8N_RUNNERS_MODE=internal
       # Deliberate, and it cannot be `true`: n8n Code nodes cannot access
       # credentials by design, on any version — `this.getCredentials()` and
@@ -265,7 +272,14 @@ services:
       - N8N_ENCRYPTION_KEY_FILE=/run/secrets/n8n_encryption_key
       - DB_POSTGRESDB_PASSWORD_FILE=/run/secrets/db_password
       - QUEUE_BULL_REDIS_PASSWORD_FILE=/run/secrets/broker_password
-      - N8N_RUNNERS_ENABLED=true
+      # N8N_RUNNERS_ENABLED is deliberately NOT set. It is deprecated upstream
+      # (n8n-io/n8n packages/cli/src/deprecation/deprecation.service.ts:
+      # `{ envVar: 'N8N_RUNNERS_ENABLED', message: SAFE_TO_REMOVE }` — "Remove
+      # this environment variable; it is no longer needed."), confirmed by live
+      # source probe of n8n-io/n8n on 2026-07-26. Setting a deprecated variable
+      # on a 2.32.3 pin is exactly the kind of stale leftover this exhibit exists
+      # to catch, so it is removed rather than carried. N8N_RUNNERS_MODE=internal
+      # alone selects the in-process task runner this stack uses.
       - N8N_RUNNERS_MODE=internal
       # Same reason as on the `n8n` service above, and it matters more here: n8n
       # Code nodes cannot access credentials by design, on any version, so the
