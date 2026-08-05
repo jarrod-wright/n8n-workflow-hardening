@@ -67,7 +67,7 @@ self-inflicted rate limit. Raise it only alongside the pacing in
 | `N8N_ENCRYPTION_KEY_FILE` | `/run/secrets/n8n_encryption_key` | Encrypts stored credentials at rest. **Keep it stable and back it up** — losing it makes every stored credential permanently undecryptable, with no recovery path but deleting and re-entering each one. |
 | `N8N_BLOCK_ENV_ACCESS_IN_NODE` | `false` | Deliberate, and it cannot be `true`. n8n Code nodes cannot read credentials on any version, so the `Verify HMAC` node has no way to reach its secret except `$env`. The blast radius is bounded by *delivery* instead: exactly one secret is reachable, and a test fails the build if a second appears. |
 | `NODE_FUNCTION_ALLOW_BUILTIN` | `crypto` | The narrowest allowance that lets the HMAC check run. Not `*`. |
-| `N8N_RUNNERS_ENABLED` | `true` | Task runners execute Code nodes in a separate process. External runners are the default posture in n8n v2.0+. |
+| `N8N_RUNNERS_ENABLED` | *(not set)* | Deprecated upstream and deliberately omitted — n8n's own `deprecation.service.ts` marks it `SAFE_TO_REMOVE`. Task runners are on by default from n8n v2.0+, so `N8N_RUNNERS_MODE` alone is sufficient. |
 | `N8N_RUNNERS_MODE` | `internal` | Runner lifecycle managed by n8n itself. |
 
 **Never set a `*_FILE` variable alongside its plain form.** On this version the
