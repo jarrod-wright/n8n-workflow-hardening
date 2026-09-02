@@ -206,12 +206,24 @@ test('LICENSE is the MIT licence in full, not a stub', () => {
     'LICENSE must carry the warranty disclaimer — a truncated licence grants nothing clearly');
 });
 
-test('SECURITY.md gives a reporting route and names no real contact address', () => {
+test('SECURITY.md gives a reporting route and a reachable contact address', () => {
   const policy = read('SECURITY.md');
   assert.match(policy, /report/i, 'SECURITY.md must tell a reporter how to report');
   assert.match(policy, /vulnerabilit/i);
-  assert.match(policy, /PLACEHOLDER|example\.invalid/,
-    'the contact must stay an explicit placeholder — this repository publishes no real address');
+  // A security policy naming an unreachable mailbox is worse than one naming
+  // none: it invites a report that silently goes nowhere. The address must be
+  // real, and must be the SAME one the README publishes — two addresses across
+  // two files is a reporter's dead end waiting to happen.
+  assert.doesNotMatch(policy, /PLACEHOLDER|example\.invalid/,
+    'SECURITY.md must not ship a placeholder contact address on a published repository');
+  const readme = read('README.md');
+  const addr = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i;
+  const inPolicy = policy.match(addr);
+  const inReadme = readme.match(addr);
+  assert.ok(inPolicy, 'SECURITY.md must name a contact address');
+  assert.ok(inReadme, 'README.md must name a contact address');
+  assert.equal(inPolicy[0], inReadme[0],
+    `SECURITY.md and README.md must publish the SAME address — found "${inPolicy[0]}" and "${inReadme[0]}"`);
 });
 
 // --- Secret-shape scan over the committed environment example -------------
