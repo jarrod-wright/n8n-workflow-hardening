@@ -26,13 +26,11 @@ Report privately by either route:
 1. **GitHub private vulnerability reporting** — the *Security* tab of this
    repository, *Report a vulnerability*. This is preferred: it keeps the report,
    the discussion, and the advisory in one place.
-2. **Email** — `SECURITY_CONTACT_PLACEHOLDER@example.invalid`
+2. **Email** — `jarr.wright@gmail.com`, with `security` in the subject line.
 
-> Replace `SECURITY_CONTACT_PLACEHOLDER@example.invalid` with a real, monitored
-> address before publishing a fork of this repository. It is a deliberate
-> placeholder: this reference repository does not publish a contact address, and
-> a security policy that names an unmonitored mailbox is worse than one that
-> names none.
+> If you fork this repository, replace the address above with your own monitored
+> mailbox before publishing. A security policy that names an unmonitored mailbox
+> is worse than one that names none.
 
 ### What to include
 

@@ -38,7 +38,7 @@ says plainly which.
 |---|---|---|
 | **Workflow** ← *you are here* | The automations themselves: authenticated ingress, idempotency, bounded retries, dead-lettering, model-output validation, liveness | **this repository** |
 | **Stack and container** | Compose topology, reverse proxy and TLS termination, queue mode, secret delivery, capability drops, database privileges | [`n8n-hardened-reference`](https://github.com/jarrod-wright/n8n-hardened-reference) |
-| **Host and OS** | CIS Ubuntu 24.04 Level 1, Server profile: SSH policy, kernel and sysctl parameters, host firewall, auditd, patch posture | `vps-hardening-reference`, in development, not yet published |
+| **Host and OS** | CIS Ubuntu 24.04 Level 1, Server profile: SSH policy, kernel and sysctl parameters, host firewall, auditd, patch posture | [`vps-hardening-reference`](https://github.com/jarrod-wright/vps-hardening-reference) — scope and status published, assertion suite in development |
 
 They compose without overlapping, and each is incomplete on its own. Hardened
 workflows on an unhardened host leave correct logic behind an open door. A
@@ -68,6 +68,16 @@ container-plane project above.
 | [`tests/`](tests/) | Failure-injection and structural tests, run with `node:test`. |
 | [`typeversions.json`](typeversions.json) | Every node `typeVersion` this repository is pinned to, confirmed against a live instance. |
 | [`PUBLISH-CHECKLIST.md`](PUBLISH-CHECKLIST.md) | The publish-readiness checks that cannot honestly be automated. |
+
+## Prerequisites
+
+- **Node.js 20 or later** — declared in `package.json` `engines`.
+- **Docker, with Compose v2** — required to run the stack, and required by the
+  parts of the test suite that render or exercise it. Without it those parts
+  cannot be measured and report as such rather than passing.
+
+The linter needs neither a stack nor any dependency, which is why the
+one-command check at the top of this file works on a bare checkout.
 
 ## Quick start
 
@@ -159,7 +169,8 @@ documentation renders empty while the API still returns HTTP 200.
 
 Host and OS hardening — SSH policy, kernel and sysctl parameters, host firewall,
 auditd, patch posture — is out of scope here, and it is not the container-plane
-project's job either: it is the third plane, still in development. Public-internet
+project's job either: it is the third plane, whose scope and status are published
+and whose assertion suite is in development. Public-internet
 exposure and TLS termination belong to the container plane. See
 [The three planes](#the-three-planes).
 
@@ -203,4 +214,9 @@ Jarrod Wright, working as **The Certainty Engineer**. I work on the reliability 
 
 Engagements usually take one of three shapes: a fixed-scope audit of an existing deployment against named failure modes, a hardening pass that closes what the audit finds, or a migration of live automations onto a hardened stack. Findings come back as evidence you can re-run, in the same form as the tests here.
 
-Reachable at **jarr.wright@gmail.com**.
+**If that is close to what you need, email jarr.wright@gmail.com.** Tell me what you are
+running and what is breaking, and I will tell you straight whether I can help and what it
+would take. If you would rather ask in public first, open an issue on this repository.
+
+*If you found me through a freelancing platform, please keep the conversation there until a
+contract is in place.*
