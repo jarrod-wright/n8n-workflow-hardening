@@ -74,7 +74,7 @@ container-plane project above.
 - **Node.js 20 or later** — declared in `package.json` `engines`.
 - **Docker, with Compose v2** — required to run the stack, and required by the
   parts of the test suite that render or exercise it. Without it those parts
-  cannot be measured and report as such rather than passing.
+  fail rather than skip: the suite does not report a pass it did not measure.
 
 The linter needs neither a stack nor any dependency, which is why the
 one-command check at the top of this file works on a bare checkout.
