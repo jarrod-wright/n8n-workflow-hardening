@@ -208,15 +208,26 @@ date each claim was observed:
 
 ---
 
+## What this proves
+
+A workflow that works in a demo can still lose an order. Each workflow here answers a failure a demo never shows. The five are an unauthenticated webhook, the same order arriving twice, an upstream 503, a model returning prose instead of JSON, and a scheduled job that silently stops.
+
+For each one, a test in tests/ causes the failure on purpose and checks the response, so you can re-run the evidence yourself.
+
+These are the patterns I apply when I repair and harden a client's n8n workflows, after a written diagnosis has found the cause.
+
 ## Who built this
 
-Jarrod Wright, working as **The Certainty Engineer**. I work on the reliability of self-hosted n8n across three planes: the workflows, the container stack they run on, and the host underneath. These repositories are the reference implementations I work from.
+Jarrod Wright, working as **The Certainty Engineer**. I step in when a production n8n workflow or AI agent breaks, working across three planes: the workflows, the container stack they run on, and the host underneath. These repositories are the reference implementations I work from.
 
-Engagements usually take one of three shapes: a fixed-scope audit of an existing deployment against named failure modes, a hardening pass that closes what the audit finds, or a migration of live automations onto a hardened stack. Findings come back as evidence you can re-run, in the same form as the tests here.
+Every engagement follows one sequence. Triage is free: what broke, and whether I'm the right person.
 
-**If that is close to what you need, email jarr.wright@gmail.com.** Tell me what you are
-running and what is breaking, and I will tell you straight whether I can help and what it
-would take. If you would rather ask in public first, open an issue on this repository.
+Then comes a paid, written diagnosis, where every root cause is backed by evidence and the report names causes, never people.
 
-*If you found me through a freelancing platform, please keep the conversation there until a
-contract is in place.*
+No repair starts before that. It's proven against a test that reproduces the failure, and handed back with a runbook so you can run it without me. The method follows Google SRE incident practice, ITIL 4 change control and NIST SP 800-61r3 for security incidents.
+
+**If that is close to what you need, email jarr.wright@gmail.com.** Tell me what you are running and what is breaking. I reply within 24 hours, and I'll tell you straight whether I can help and what the first step costs.
+
+If you would rather ask in public first, open an issue on this repository.
+
+*If you found me through a freelancing platform, please keep the conversation there until a contract is in place.*
