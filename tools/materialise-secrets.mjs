@@ -22,7 +22,12 @@
 // WHY GENERATED RATHER THAN COMMITTED
 // It carries a real secret value, so it cannot live in the repo. `.env` stays
 // the single file an operator edits; this derives the delivery surface from it.
-// Everything written here is git-ignored (see .gitignore) and mode 0600.
+// Everything written here is git-ignored (see .gitignore). The directory is mode 0700.
+// The three compose secret FILES are mode 0444: the n8n containers read them as a non-root
+// user whose UID need not match the invoking user's (measured: a 0600 file owned by
+// a UID-1001 CI runner is unreadable to the image's UID-1000 process, and boot fails with
+// EACCES on /run/secrets). 0444 keeps every file read-only; the hygiene invariant that
+// matters is unchanged: the values never enter the environment or docker inspect.
 //
 // Runs automatically as the `pre` hook of `stack:up`, `stack:config` and
 // `test:offline`, so the documented commands are unchanged.
@@ -134,8 +139,11 @@ for (const { file, from } of SECRET_FILES) {
   // would be part of the password. n8n presents the file's contents verbatim —
   // measured: a deliberately wrong value in the file produced WRONGPASS from the
   // broker, so it is the bytes that are consumed, not merely the file's presence.
-  writeFileSync(target, env[from], { mode: 0o600 });
-  chmodSync(target, 0o600);
+  // 0444, not 0600: the container's non-root user must read the file, and the invoking
+  // user's UID is not guaranteed to match it (see the header note). The n8n.env file below
+  // stays 0600: only the host-side tooling reads it.
+  writeFileSync(target, env[from], { mode: 0o444 });
+  chmodSync(target, 0o444);
 }
 
 const lines = [

@@ -13,10 +13,13 @@ in [`../tests/`](../tests) drive real workflows against these real services.
 | `valkey` | `valkey/valkey:9.1` | Redis-protocol broker for the Bull queue | **no** (see below) |
 | `postgres` | `postgres:16.14` | n8n data store + `idempotency_keys` / `dead_letter` | no |
 | `mock-api` | `node:20-alpine` | Mock upstream API with dual counters (test double) | no |
+| `mock-llm` | `node:20-alpine` | Mock model provider returning a controllable response (test double) | no |
+| `prometheus` | `prom/prometheus:v3.7.3` | Scrapes both n8n processes for execution metrics | `127.0.0.1:9090` only |
+| `grafana` | `grafana/grafana:12.3.1` | Pre-provisioned ops dashboard over the Prometheus data | `127.0.0.1:3030` only |
 
-Only the webhook ingress is published, and only to loopback. The broker, the
-database, and the mock upstream are reachable **only** on the internal compose
-network.
+Only the webhook ingress and the two observability surfaces are published, and
+only to loopback. The broker, the database, and the two mock upstreams are
+reachable **only** on the internal compose network.
 
 ## Bring-up
 
