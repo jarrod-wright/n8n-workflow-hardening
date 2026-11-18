@@ -1,5 +1,7 @@
 # n8n Production Hardening
 
+[![ci](https://github.com/jarrod-wright/n8n-workflow-hardening/actions/workflows/ci.yml/badge.svg)](https://github.com/jarrod-wright/n8n-workflow-hardening/actions/workflows/ci.yml)
+
 **Workflow plane.** Six n8n workflows, three worked scenarios and three shared mechanisms, plus a 13-rule static linter: authenticated ingress, exactly-once processing, retry to dead-letter to replay, resumable syncs, deterministic handling of model output.
 
 **Verifiable in a minute.** `package.json` declares no dependencies, so this runs on a clean checkout with nothing installed:
@@ -9,6 +11,8 @@ node linter/cli.js lint 01-order-intake/workflow.json
 ```
 
 Every rule traces to a named failure mode, and every claim is proven by a test that causes that failure on purpose. Start at [docs/testing.md](docs/testing.md).
+
+CI runs the same evidence on every push: the offline suite, the aggregate lint (non-zero on any ERROR), and the live queue-mode stack with the failure-injection suites. The badge above is the current result.
 
 A worked reference for taking n8n workflows from "it runs on my machine" to
 something that survives production: authenticated ingress, exactly-once
@@ -210,9 +214,10 @@ date each claim was observed:
 
 ## What this proves
 
-A workflow that works in a demo can still lose an order. Each workflow here answers a failure a demo never shows. The five are an unauthenticated webhook, the same order arriving twice, an upstream 503, a model returning prose instead of JSON, and a scheduled job that silently stops.
+A workflow that works in a demo can still lose an order. Each workflow here answers a failure a demo never shows. The five worked scenarios are an unauthenticated webhook, the same order arriving twice, an upstream 503, a model returning prose instead of JSON, and a scheduled job that silently stops.
 
 For each one, a test in tests/ causes the failure on purpose and checks the response, so you can re-run the evidence yourself.
+The same failure modes are the ones that drop inbound leads between the form and the CRM.
 
 These are the patterns I apply when I repair and harden a client's n8n workflows, after a written diagnosis has found the cause.
 
@@ -225,6 +230,8 @@ Every engagement follows one sequence. Triage is free: what broke, and whether I
 Then comes a paid, written diagnosis, where every root cause is backed by evidence and the report names causes, never people.
 
 No repair starts before that. It's proven against a test that reproduces the failure, and handed back with a runbook so you can run it without me. The method follows Google SRE incident practice, ITIL 4 change control and NIST SP 800-61r3 for security incidents.
+
+The same engineering backs inbound-aware GTM systems I build for SaaS teams whose inbound runs on automations. The work covers speed-to-lead with a system SLA, dormant-pipeline recycling from your own systems, and pipeline reporting. That work starts the same way, with a written diagnosis.
 
 **If that is close to what you need, email jarr.wright@gmail.com.** Tell me what you are running and what is breaking. I reply within 24 hours, and I'll tell you straight whether I can help and what the first step costs.
 

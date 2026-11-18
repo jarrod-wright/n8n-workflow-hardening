@@ -1,0 +1,65 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  offline:
+    name: offline suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Generate a throwaway .env from the example (CI values, one random per declared token)
+        run: |
+          cp .env.example .env
+          for tok in $(grep -o 'CHANGE_ME_[A-Z0-9_]*' .env.example | tr -d '\r' | sort -u); do
+            sed -i "s/${tok}/$(openssl rand -hex 24)/g" .env
+          done
+          if grep -q 'CHANGE_ME_' .env; then echo '::error::placeholders left in .env'; exit 1; fi
+      - name: Vocabulary scan
+        run: npm run --silent grep-gate
+      - name: Offline suite (no Docker required by construction)
+        run: npm run --silent test:offline
+      - name: Aggregate lint (non-zero on any ERROR)
+        run: npm run --silent lint:all
+
+  stack:
+    name: live stack suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Generate a throwaway .env from the example
+        run: |
+          cp .env.example .env
+          for tok in $(grep -o 'CHANGE_ME_[A-Z0-9_]*' .env.example | tr -d '\r' | sort -u); do
+            sed -i "s/${tok}/$(openssl rand -hex 24)/g" .env
+          done
+      - name: Boot the stack (n8n main + worker, Valkey, PostgreSQL, mocks, Prometheus, Grafana)
+        run: npm run --silent stack:up || (docker compose -f deployment/docker-compose.yml --env-file .env logs --no-color n8n n8n-worker | tail -120 && exit 1)
+      - name: Integration suite (failure injections against the live stack)
+        run: npm run --silent test:integration
+      - name: Stack suite (broker path and rendered-compose gates)
+        run: npm run --silent test:stack
+      - name: Tear the stack down
+        if: always()
+        run: npm run --silent stack:down || true
