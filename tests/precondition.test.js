@@ -324,7 +324,7 @@ const AUTHORED_FILE_FLOOR = 35;
 
 test('every authored test file is wired into the npm test aggregate', () => {
   const pkg = JSON.parse(read('package.json'));
-  const aggregate = `${pkg.scripts['test:offline']} ${pkg.scripts['test:integration']}`;
+  const aggregate = `${pkg.scripts['test:offline']} ${pkg.scripts['test:stack']} ${pkg.scripts['test:integration']}`;
   const unwired = authoredTestFiles().filter((f) => !aggregate.includes(f));
   assert.deepEqual(
     unwired, [],

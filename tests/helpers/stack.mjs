@@ -435,10 +435,18 @@ export function ensurePostgresCredential() {
       },
     },
   ];
+  // 0444, not 0600: the file is docker-cp'd into the container, where the n8n
+  // process runs as a non-root user whose UID need not match the invoking user's
+  // (measured on the first CI run: a 0600 file from a UID-1001 runner is
+  // unreadable to the UID-1000 process, and every workflow that references the
+  // credential then fails). The import must succeed loudly, not return a
+  // false the caller forgets to check.
   const tmp = join(tmpdir(), 'pg-cred.json');
-  writeFileSync(tmp, JSON.stringify(cred), { mode: 0o600 });
+  writeFileSync(tmp, JSON.stringify(cred), { mode: 0o444 });
   compose(['cp', tmp, 'n8n:/tmp/pg-cred.json']);
-  return compose(['exec', '-T', 'n8n', 'n8n', 'import:credentials', '--input=/tmp/pg-cred.json']).code === 0;
+  const r = compose(['exec', '-T', 'n8n', 'n8n', 'import:credentials', '--input=/tmp/pg-cred.json']);
+  if (r.code !== 0) throw new Error(`n8n import:credentials failed for pgcredential0001 (exit ${r.code}): ${r.stderr || r.stdout || 'no output'}`);
+  return true;
 }
 
 // Provision the two Header Auth credentials the webhook nodes reference — the
@@ -477,9 +485,13 @@ export function ensureWebhookAuthCredentials() {
   const containerPath = '/tmp/webhook-auth-credentials.json';
   try {
     mkdirSync(dirname(hostPath), { recursive: true, mode: 0o700 });
-    writeFileSync(hostPath, JSON.stringify(creds), { mode: 0o600 });
+    // 0444 for the same container-user reason as the pg credential above; the
+    // git-ignored directory stays 0700. The import fails loudly.
+    writeFileSync(hostPath, JSON.stringify(creds), { mode: 0o444 });
     compose(['cp', hostPath, `n8n:${containerPath}`]);
-    return compose(['exec', '-T', 'n8n', 'n8n', 'import:credentials', `--input=${containerPath}`]).code === 0;
+    const r = compose(['exec', '-T', 'n8n', 'n8n', 'import:credentials', `--input=${containerPath}`]);
+    if (r.code !== 0) throw new Error(`n8n import:credentials failed for the webhook auth credentials (exit ${r.code}): ${r.stderr || r.stdout || 'no output'}`);
+    return true;
   } finally {
     // Same step, always — including if the import threw.
     rmSync(hostPath, { force: true });
@@ -560,8 +572,12 @@ export function ensureLlmCredentials() {
     "select count(*) from credentials_entity where id in ('llmprimary000001','llmfallback00001');",
   );
   if (have >= 2) return true;
+  // 0444 for the same container-user reason as the pg credential above; the
+  // import fails loudly.
   const tmp = join(tmpdir(), 'llm-creds.json');
-  writeFileSync(tmp, JSON.stringify(creds), { mode: 0o600 });
+  writeFileSync(tmp, JSON.stringify(creds), { mode: 0o444 });
   compose(['cp', tmp, 'n8n:/tmp/llm-creds.json']);
-  return compose(['exec', '-T', 'n8n', 'n8n', 'import:credentials', '--input=/tmp/llm-creds.json']).code === 0;
+  const r = compose(['exec', '-T', 'n8n', 'n8n', 'import:credentials', '--input=/tmp/llm-creds.json']);
+  if (r.code !== 0) throw new Error(`n8n import:credentials failed for the LLM credentials (exit ${r.code}): ${r.stderr || r.stdout || 'no output'}`);
+  return true;
 }

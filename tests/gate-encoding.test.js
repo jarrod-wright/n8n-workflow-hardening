@@ -25,7 +25,7 @@ import { denylistHits } from './helpers/denylist.mjs';
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (rel) => readFileSync(join(repoRoot, rel), 'utf8');
 const pkg = JSON.parse(read('package.json'));
-const aggregate = `${pkg.scripts['test:offline']} ${pkg.scripts['test:integration']}`;
+const aggregate = `${pkg.scripts['test:offline']} ${pkg.scripts['test:stack']} ${pkg.scripts['test:integration']}`;
 
 // Directories that are not part of the product and hold no test files.
 //
